@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "EC-API Extension System — High-Level Architecture",
+    "output": "doc/extension/architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1360, 970]
+  },
+  "components": [
+    { "id": "internet", "type": "external", "label": "Internet", "pos": [40, 40], "size": [150, 56] },
+    { "id": "haproxy", "type": "cloud", "label": "HAProxy", "sublabel": "SNI Routing · TLS Passthrough", "pos": [40, 150], "size": [200, 80] },
+    { "id": "mqtt", "type": "messagebus", "label": "MQTT Broker", "sublabel": "e.g. EMQX / Mosquitto · TLS :8883", "pos": [300, 150], "size": [220, 80] },
+    { "id": "traefik", "type": "security", "label": "Traefik", "sublabel": "TLS Termination :443 · HTTP Host Routing", "pos": [40, 390], "size": [230, 84] },
+    { "id": "tlscert", "type": "security", "label": "TLS Certificate", "sublabel": "[SAN].domain.com · *.api.domain.com", "pos": [300, 280], "size": [220, 72] },
+
+    { "id": "publicApi", "type": "backend", "label": "Public API Service", "sublabel": "public-api:8000", "pos": [590, 292], "size": [190, 84] },
+    { "id": "pmDoc", "type": "backend", "label": "document-service", "sublabel": "example microservice", "pos": [880, 200], "size": [160, 60] },
+    { "id": "pmWebftp", "type": "backend", "label": "webftp", "sublabel": "example microservice", "pos": [880, 304], "size": [160, 60] },
+    { "id": "pmMore", "type": "backend", "label": "Microservice …", "sublabel": "any extension", "pos": [880, 408], "size": [160, 60] },
+
+    { "id": "ingressApi", "type": "backend", "label": "Ingress API Service", "sublabel": "ingress-api:8000", "pos": [590, 632], "size": [190, 84] },
+    { "id": "imWizard", "type": "backend", "label": "wizard", "sublabel": "example microservice", "pos": [880, 540], "size": [160, 60] },
+    { "id": "imY", "type": "backend", "label": "Microservice Y", "sublabel": "any extension", "pos": [880, 644], "size": [160, 60] },
+    { "id": "imMore", "type": "backend", "label": "Microservice …", "sublabel": "any extension", "pos": [880, 748], "size": [160, 60] },
+
+    { "id": "internalApi", "type": "backend", "label": "Internal API Service", "sublabel": "internal-api:8000 · Service Hub", "pos": [1100, 470], "size": [200, 88] },
+
+    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "API / Microservice / Device Config & State", "pos": [590, 868], "size": [260, 78], "brand": "postgresql" },
+    { "id": "devices", "type": "external", "label": "IoT Devices", "sublabel": "Machines / Edge Devices", "pos": [1150, 872], "size": [180, 72] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "EC-API Core", "wraps": ["publicApi", "ingressApi", "pmDoc", "pmWebftp", "pmMore", "imWizard", "imY", "imMore", "internalApi"], "pad": 20 },
+    { "kind": "region", "label": "Microservices – Public", "wraps": ["pmDoc", "pmWebftp", "pmMore"], "pad": 14 },
+    { "kind": "region", "label": "Microservices – Ingress", "wraps": ["imWizard", "imY", "imMore"], "pad": 14 },
+    { "kind": "region", "label": "Remote IoT Environment", "wraps": ["devices"], "pad": 14 }
+  ],
+  "connections": [
+    { "from": "internet", "to": "haproxy", "label": "TCP :443", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "from": "haproxy", "to": "mqtt", "label": "SNI = mqtt.domain.com", "labelAt": [270, 246] },
+    { "from": "haproxy", "to": "traefik", "label": "SNI = *.api.domain.com · [SAN].api.domain.com", "fromSide": "bottom", "toSide": "top", "labelAt": [218, 268] },
+    { "from": "traefik", "to": "publicApi", "label": "Host = public.api.domain.com", "variant": "emphasis", "labelAt": [420, 368] },
+    { "from": "traefik", "to": "ingressApi", "label": "Host = ingress.api.domain.com", "variant": "emphasis" },
+    { "from": "tlscert", "to": "traefik", "label": "Certificate", "variant": "dashed" },
+
+    { "from": "publicApi", "to": "pmDoc" },
+    { "from": "publicApi", "to": "pmWebftp" },
+    { "from": "publicApi", "to": "pmMore" },
+
+    { "from": "ingressApi", "to": "imWizard" },
+    { "from": "ingressApi", "to": "imY" },
+    { "from": "ingressApi", "to": "imMore" },
+
+    { "from": "pmDoc", "to": "internalApi" },
+    { "from": "pmWebftp", "to": "internalApi" },
+    { "from": "pmMore", "to": "internalApi" },
+    { "from": "imWizard", "to": "internalApi" },
+    { "from": "imY", "to": "internalApi" },
+    { "from": "imMore", "to": "internalApi" },
+
+    { "from": "internalApi", "to": "postgres", "label": "DB Connection", "fromSide": "bottom", "toSide": "top", "via": [[1200, 844], [720, 844]], "labelAt": [960, 844] },
+    { "from": "internalApi", "to": "devices", "label": "REST / HTTP · Dynamic Routing", "fromSide": "right", "toSide": "top", "via": [[1336, 514], [1336, 800], [1240, 800]], "labelAt": [1280, 816] }
+  ]
+}

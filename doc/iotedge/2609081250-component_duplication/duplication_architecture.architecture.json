@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "IoT Hub Transport Component Duplication",
+    "output": "doc/iotedge/2609081250/duplication_architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "consumer-entry",
+        "label": "Callers & Entrypoints",
+        "focus": ["client", "ext_services", "ext_transport", "router_cmd", "router_twin", "router_gen"],
+        "note": "See how caller traffic diverges between the extension transport and legacy router implementations."
+      },
+      {
+        "id": "duplicated-paths",
+        "label": "Duplicated Call Sites",
+        "focus": ["ext_transport", "router_cmd", "router_twin", "router_gen", "auth_helper", "async_client"],
+        "note": "Identify the four independent implementations of IoT Hub URL, auth, and request handling."
+      },
+      {
+        "id": "upstream-dispatch",
+        "label": "IoT Hub Upstream Dispatch",
+        "focus": ["async_client", "iothub"],
+        "note": "All paths converge on async HTTP requests targeting Azure IoT Hub twin and method REST endpoints."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ext_services",
+      "type": "backend",
+      "label": "Extensions Subsystem",
+      "sublabel": "health & runtime",
+      "pos": [40, 130],
+      "size": [140, 56]
+    },
+    {
+      "id": "client",
+      "type": "external",
+      "label": "API Client",
+      "sublabel": "HTTP consumer",
+      "pos": [40, 310],
+      "size": [140, 56]
+    },
+    {
+      "id": "ext_transport",
+      "type": "backend",
+      "label": "iotedge_transport",
+      "sublabel": "extensions adapter",
+      "tag": "new adapter",
+      "pos": [290, 130],
+      "size": [156, 56]
+    },
+    {
+      "id": "router_cmd",
+      "type": "backend",
+      "label": "cmd_proxy Router",
+      "sublabel": "post_device_cmd_*",
+      "tag": "legacy route",
+      "pos": [290, 220],
+      "size": [156, 56]
+    },
+    {
+      "id": "router_twin",
+      "type": "backend",
+      "label": "module_config Router",
+      "sublabel": "twin read & patch",
+      "tag": "legacy route",
+      "pos": [290, 310],
+      "size": [156, 56]
+    },
+    {
+      "id": "router_gen",
+      "type": "backend",
+      "label": "general Router",
+      "sublabel": "methods & discovery",
+      "tag": "legacy route",
+      "pos": [290, 400],
+      "size": [156, 56]
+    },
+    {
+      "id": "auth_helper",
+      "type": "security",
+      "label": "Auth Helper",
+      "sublabel": "SAS / Workload token",
+      "tag": "shared helper",
+      "pos": [570, 130],
+      "size": [146, 56]
+    },
+    {
+      "id": "async_client",
+      "type": "backend",
+      "label": "Async Requests",
+      "sublabel": "httpx connection pool",
+      "tag": "shared client",
+      "pos": [570, 310],
+      "size": [146, 56]
+    },
+    {
+      "id": "iothub",
+      "type": "cloud",
+      "label": "Azure IoT Hub",
+      "sublabel": "REST /twins API",
+      "tag": "upstream",
+      "pos": [840, 220],
+      "size": [146, 60]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Edge Config API Application",
+      "wraps": ["ext_transport", "router_cmd", "router_twin", "router_gen", "auth_helper", "async_client"],
+      "pad": 16
+    },
+    {
+      "kind": "security-group",
+      "label": "Duplicated Call Sites",
+      "wraps": ["ext_transport", "router_cmd", "router_twin", "router_gen"],
+      "pad": 10
+    }
+  ],
+  "connections": [
+    {
+      "id": "sub-to-transport",
+      "from": "ext_services",
+      "to": "ext_transport",
+      "label": "internal call",
+      "variant": "emphasis"
+    },
+    {
+      "id": "client-to-cmd",
+      "from": "client",
+      "to": "router_cmd"
+    },
+    {
+      "id": "client-to-twin",
+      "from": "client",
+      "to": "router_twin"
+    },
+    {
+      "id": "client-to-gen",
+      "from": "client",
+      "to": "router_gen"
+    },
+    {
+      "id": "ext-to-auth",
+      "from": "ext_transport",
+      "to": "auth_helper",
+      "variant": "security"
+    },
+    {
+      "id": "auth-to-async",
+      "from": "auth_helper",
+      "to": "async_client",
+      "variant": "security"
+    },
+    {
+      "id": "ext-to-async",
+      "from": "ext_transport",
+      "to": "async_client"
+    },
+    {
+      "id": "cmd-to-async",
+      "from": "router_cmd",
+      "to": "async_client"
+    },
+    {
+      "id": "twin-to-async",
+      "from": "router_twin",
+      "to": "async_client"
+    },
+    {
+      "id": "gen-to-async",
+      "from": "router_gen",
+      "to": "async_client"
+    },
+    {
+      "id": "async-to-hub",
+      "from": "async_client",
+      "to": "iothub",
+      "label": "HTTPS REST",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Duplicated Call Sites",
+      "items": [
+        "Four modules independently build IoT Hub REST URLs",
+        "Each router duplicates auth header acquisition and error parsing"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Divergent Behavior",
+      "items": [
+        "Extensions use fixed 45s timeout; routers compute dynamic timeouts",
+        "Error handling diverges between typed exceptions and raw status tuples"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Consolidation Target",
+      "items": [
+        "Unify IoT Hub dispatch in one tested transport adapter",
+        "Standardize authentication, error handling, and timeout policies"
+      ]
+    }
+  ]
+}

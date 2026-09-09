@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "IoT Hub Direct Method",
+    "output": "doc/iotedge/2609081130/sequence.html",
+    "viewBox": [800, 600],
+    "animation": "trace",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    { "id": "caller", "type": "frontend", "label": "Caller", "sublabel": "Router" },
+    { "id": "transport", "type": "backend", "label": "Transport", "sublabel": "Extensions" },
+    { "id": "auth", "type": "security", "label": "Auth", "sublabel": "Helper" },
+    { "id": "async_req", "type": "external", "label": "AsyncReq", "sublabel": "httpx" },
+    { "id": "iothub", "type": "external", "label": "IoTHub", "sublabel": "REST" }
+  ],
+  "segments": [
+    { "from": 100, "to": 300, "label": "Request" },
+    { "from": 310, "to": 550, "label": "Response" }
+  ],
+  "messages": [
+    { "id": "msg1", "from": "caller", "to": "transport", "y": 170, "label": "invoke", "variant": "default" },
+    { "id": "msg2", "from": "transport", "to": "auth", "y": 210, "label": "get_auth", "variant": "default" },
+    { "id": "msg3", "from": "auth", "to": "transport", "y": 250, "label": "headers", "variant": "return" },
+    { "id": "msg4", "from": "transport", "to": "async_req", "y": 290, "label": "post_async", "variant": "default" },
+    { "id": "msg5", "from": "async_req", "to": "iothub", "y": 330, "label": "POST", "variant": "default" },
+    { "id": "msg6", "from": "iothub", "to": "async_req", "y": 370, "label": "200 OK", "variant": "return" },
+    { "id": "msg7", "from": "async_req", "to": "transport", "y": 410, "label": "response", "variant": "return" },
+    { "id": "msg8", "from": "transport", "to": "caller", "y": 450, "label": "JSON", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "caller", "from": 140, "to": 460, "type": "frontend" },
+    { "participant": "transport", "from": 155, "to": 455, "type": "backend" },
+    { "participant": "auth", "from": 195, "to": 255, "type": "security" },
+    { "participant": "async_req", "from": 275, "to": 415, "type": "external" },
+    { "participant": "iothub", "from": 315, "to": 375, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Flow Details",
+      "items": [
+        "Auth: get_iothub_auth_headers",
+        "Async: post_async via httpx",
+        "Response: Parsed JSON from IoT Hub"
+      ]
+    }
+  ]
+}

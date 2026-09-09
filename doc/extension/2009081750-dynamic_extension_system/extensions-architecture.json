@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Dynamic API Extension System",
+    "output": "doc/diagram.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/eclipse-sealman/sealman-edge-config-api.git",
+      "revision": "1f069a0f7a8beadd513e4f31091cc4f8d3a25357"
+    }
+  },
+  "components": [
+    {
+      "id": "callers",
+      "type": "external",
+      "label": "Callers",
+      "pos": [40, 294],
+      "size": [220, 70],
+      "sources": [{ "path": "extensions/__init__.py", "label": "channels" }]
+    },
+    {
+      "id": "management",
+      "type": "backend",
+      "label": "Public extension API",
+      "tag": "JWT + RBAC/ABAC",
+      "pos": [300, 290],
+      "size": [190, 78],
+      "sources": [{ "path": "extensions/setup.py", "label": "management router" }]
+    },
+    {
+      "id": "registry",
+      "type": "backend",
+      "label": "Registry + schemas",
+      "pos": [510, 115],
+      "size": [190, 78],
+      "sources": [
+        { "path": "extensions/registry.py", "label": "business logic" },
+        { "path": "extensions/schemas.py", "label": "Pydantic models" }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "Dynamic runtime",
+      "pos": [510, 290],
+      "size": [190, 78],
+      "sources": [{ "path": "extensions/runtime.py", "label": "route mounting" }]
+    },
+    {
+      "id": "authorization",
+      "type": "security",
+      "label": "Route authorization",
+      "pos": [510, 490],
+      "size": [190, 78],
+      "sources": [
+        { "path": "extensions/security.py", "label": "key hashing" },
+        { "path": "extensions/runtime.py", "label": "per-route auth" }
+      ]
+    },
+    {
+      "id": "repository",
+      "type": "database",
+      "label": "Extension repository",
+      "pos": [760, 115],
+      "size": [200, 78],
+      "sources": [{ "path": "extensions/registry.py", "label": "repository writes" }]
+    },
+    {
+      "id": "openapi",
+      "type": "backend",
+      "label": "OpenAPI enrichment",
+      "pos": [760, 290],
+      "size": [200, 78],
+      "sources": [{ "path": "extensions/openapi.py", "label": "spec inference" }]
+    },
+    {
+      "id": "health",
+      "type": "backend",
+      "label": "Health verifier",
+      "pos": [760, 490],
+      "size": [200, 78],
+      "sources": [{ "path": "extensions/health.py", "label": "upstream health" }]
+    },
+    {
+      "id": "sideapps",
+      "type": "backend",
+      "label": "Keyed side apps",
+      "tag": "X-Internal-Key / X-Device-Key",
+      "pos": [1020, 285],
+      "size": [215, 86],
+      "sources": [{ "path": "extensions/setup.py", "label": "side servers" }]
+    },
+    {
+      "id": "proxy",
+      "type": "backend",
+      "label": "HTTP proxy",
+      "pos": [1200, 115],
+      "size": [190, 78],
+      "sources": [{ "path": "extensions/proxy.py", "label": "request forwarding" }]
+    },
+    {
+      "id": "httpupstreams",
+      "type": "external",
+      "label": "HTTP micro-services",
+      "pos": [1450, 115],
+      "size": [205, 78],
+      "sources": [{ "path": "extensions/schemas.py", "label": "http upstream" }]
+    },
+    {
+      "id": "iothubedge",
+      "type": "cloud",
+      "label": "IoT Hub + Edge modules",
+      "tag": "IoT Edge transport",
+      "pos": [1450, 430],
+      "size": [205, 86],
+      "sources": [{ "path": "extensions/iotedge_transport.py", "label": "IoT Hub REST" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Edge Config API extension subsystem",
+      "wraps": ["management", "registry", "runtime", "authorization", "repository", "openapi", "health", "sideapps", "proxy"]
+    }
+  ],
+  "connections": [
+    { "id": "caller-management", "from": "callers", "to": "management", "label": "manage / invoke", "variant": "emphasis", "labelDy": -40 },
+    { "id": "management-auth", "from": "management", "to": "authorization", "label": "JWT + RBAC/ABAC", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "management-registry", "from": "management", "to": "registry", "label": "register / deregister", "fromSide": "top", "toSide": "bottom" },
+    { "id": "registry-repository", "from": "registry", "to": "repository", "label": "persist specs, routes, keys", "labelDy": 63 },
+    { "id": "registry-runtime", "from": "registry", "to": "runtime", "label": "route specifications", "labelDx": 90 },
+    { "id": "runtime-openapi", "from": "runtime", "to": "openapi", "label": "keep /docs in sync", "labelDy": 63 },
+    { "id": "runtime-sideapps", "from": "runtime", "to": "sideapps", "label": "mount live routes", "via": [[720, 329], [720, 220], [1127.5, 220], [1127.5, 328]] },
+    { "id": "runtime-auth", "from": "runtime", "to": "authorization", "label": "per-route checks", "labelDx": -100, "fromSide": "bottom", "toSide": "top" },
+    { "id": "runtime-proxy", "from": "runtime", "to": "proxy", "label": "authorized HTTP dispatch", "labelDy": 25, "fromSide": "top", "toSide": "bottom" },
+    { "id": "health-http", "from": "health", "to": "httpupstreams", "label": "health + version", "labelDy": 27, "fromSide": "right", "toSide": "bottom", "via": [[1000, 529], [1000, 600], [1700, 600], [1700, 260], [1552.5, 260]] },
+    { "id": "sideapps-proxy", "from": "sideapps", "to": "proxy", "label": "keyed HTTP route", "fromSide": "top", "toSide": "bottom" },
+    { "id": "proxy-http", "from": "proxy", "to": "httpupstreams", "label": "forward request", "variant": "emphasis", "labelDy": 63 },
+    { "id": "runtime-iothub", "from": "runtime", "to": "iothubedge", "label": "direct method / twin", "labelDx": -120, "fromSide": "bottom", "toSide": "top" },
+    { "id": "sideapps-iothub", "from": "sideapps", "to": "iothubedge", "label": "IoT Edge route", "fromSide": "bottom", "toSide": "top", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Registration", "items": ["/extensions is mounted on the public FastAPI app", "Registry validates manifests and enrolls extension actions", "Persisted routes are rehydrated at startup"] },
+    { "dot": "emerald", "title": "Dispatch", "items": ["Public routes use the existing ABAC permission dependency", "Internal and field-ingress routes use namespace-locked keys", "HTTP routes proxy upstream requests; IoT Edge routes call twins or direct methods"] },
+    { "dot": "rose", "title": "Operations", "items": ["Upstream OpenAPI can enrich generated /docs", "Health checks report reachability, deployment, and version compatibility", "Deregistration removes live routes and persisted extension data"] }
+  ]
+}
