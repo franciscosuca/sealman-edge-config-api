@@ -2,10 +2,10 @@
 
 Input validation shapes only — no persistence, no business rules (that's registry.py's
 job). Field-level cross-references (e.g. a route's `upstream` key must exist in
-`upstreams`, `iotedge` must be present iff the referenced upstream is `type: "iotedge"`)
-are manifest-wide business rules validated by registry.py, not enforced here.
-`schema_version`, `validation_mode` and the `body`/`example` pairing check will be
-implemented in a later stage and are intentionally not present yet.
+`upstreams`, `iotedge` must be present iff the referenced upstream is `type: "iotedge"`,
+`body_ref` requiring an `http` upstream) are manifest-wide business rules validated by
+registry.py, not enforced here. `schema_version` is a later stage's addition and is
+intentionally not present yet.
 """
 
 from typing import Annotated, Dict, List, Literal, Optional, Union
@@ -70,9 +70,21 @@ class RouteSpec(BaseModel):
     deprecated: bool = False
     status_code: int = 200
     query_params: List[QueryParamSpec] = Field(default_factory=list)
-    # Literal JSON Schema (validated via `jsonschema` in a later stage) — not an OpenAPI wrapper.
+    # Literal JSON Schema (validated via `jsonschema` at registration + request time,
+    # see extensions/body_validation.py) — not an OpenAPI wrapper. Mutually exclusive
+    # with `body_ref` on a *registration* payload (registry.py's job to reject both — a
+    # persisted route legitimately has both a `body_ref: true` and a `body` snapshot
+    # fetched from the upstream, so this can't be a model-level invariant here).
     body: Optional[dict] = None
     example: Optional[dict] = None
+    # If set, this route's body schema is fetched from its own `http` upstream's
+    # `{base_url}/openapi.json` instead of being declared here (`upstream_declared` /
+    # `unreachable_ref` validation_mode, see `validation_mode` below).
+    body_ref: bool = False
+    # Server-computed (registry.py's `_resolve_route_validation`), never taken from a
+    # client-supplied manifest as-is — present here only so GET/list responses surface it
+    # verbatim.
+    validation_mode: Optional[Literal["declared", "upstream_declared", "unreachable_ref", "none"]] = None
     visibility: Literal["public", "internal"] = "public"
     required_action: Optional[str] = None
     scoped: bool = False

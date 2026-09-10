@@ -4,13 +4,13 @@ persistence, RBAC action enrollment, the enable/disable route-mounting lifecycle
 and internal-key rotation.
 
 The field-ingress side app and its device-key auth channel are deliberately not
-implemented (skipped for the whole effort, not just deferred to a later stage — see
-.mervin/IMPLEMENTATION-LOG.md) so there is no device-key coverage here.
+implemented (skipped for now, not just deferred to a later stage) so there is no
+device-key coverage here.
 
 Route mounting is verified by inspecting the live route tables of the two apps
 (`main.app`, `extensions.setup.internal_app`) rather than by calling the mounted
-routes themselves — actual upstream dispatch is a placeholder 501 until a later stage
-(see extensions/runtime.py).
+routes themselves — actual dispatch through a mounted route is covered separately
+in test_extensions_dispatch.py (see extensions/upstreams/http.py, extensions/upstreams/iotedge.py).
 """
 from uuid import uuid4
 
@@ -199,6 +199,24 @@ class TestExtensionsManagementRoutesAsAdmin:
         replacement = _sample_registration(name)  # drops the action
         response = await client.put(f"/extensions/{name}", json=replacement)
         assert response.status_code == 409
+
+    async def test_register_and_replace_with_new_required_action_on_a_route(self, client):
+        """Regression test: a route's `required_action` FK depends on that action row
+        already existing — actions must be enrolled before routes referencing them are
+        persisted, on both register and replace (not just on register)."""
+        name = _unique_name("required_action_ext")
+        registration = _sample_registration(name)
+        registration["actions"] = [{"name": f"{name}.read", "description": "read"}]
+        registration["routes"][0]["required_action"] = f"{name}.read"
+
+        register_response = await client.post("/extensions", json=registration)
+        assert register_response.status_code == 201
+
+        replacement = _sample_registration(name)
+        replacement["actions"] = [{"name": f"{name}.write", "description": "write"}]
+        replacement["routes"][0]["required_action"] = f"{name}.write"
+        replace_response = await client.put(f"/extensions/{name}", json=replacement)
+        assert replace_response.status_code == 200
 
 
 class TestExtensionsManagementRoutesAuthorization:

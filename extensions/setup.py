@@ -3,12 +3,11 @@ management router.
 
 Business logic lives in `extensions/registry.py`; this module only builds the side
 app, mounts the router (with real `db/repos`-backed dependencies, not a module-level
-stub), and re-hydrates persisted routes at startup. See
-`.mervin/extension-mechanism-implementation-plan.md` for the full scope.
+stub), and re-hydrates persisted routes at startup.
 
 The field-ingress side app and its device-key auth channel are deliberately **not**
-implemented — skipped for the whole effort until explicitly picked back up (see
-IMPLEMENTATION-LOG.md's carry-over notes), not just deferred to a later stage.
+implemented — skipped until explicitly picked back up, not just deferred to a later
+stage.
 """
 
 import asyncio
@@ -58,8 +57,7 @@ def _build_management_router() -> BaseAPIRouter:
     """Builds the /extensions management router.
 
     Kept inline here (not under routers/<feature>/router.py) because it's constructed
-    together with, and closes over, the two side apps it also mounts/unmounts routes on
-    — see the plan's "Management routes deliberately do not live under routers/" note.
+    together with, and closes over, the two side apps it also mounts/unmounts routes on.
     """
     router = BaseAPIRouter(prefix="/extensions", tags=["Admin – Extensions"])
     register_dep = Depends(ABACPermissionCheck(Extension.REGISTER, device_path=None))
@@ -152,9 +150,11 @@ def _build_management_router() -> BaseAPIRouter:
     ) -> ExtensionDetail:
         # Idempotent: drop any already-live routes first so re-enabling self-heals a
         # partial/stale mount instead of duplicating routes.
-        runtime.remove_live_routes(internal_app, name)
+        for app in (_public_app, internal_app):
+            runtime.remove_live_routes(app, name)
+        upstreams = await extension_repo.list_upstreams(name)
         routes = await extension_repo.list_routes(name)
-        runtime.add_routes_from_specs(_public_app, internal_app, name, routes)
+        runtime.add_routes_from_specs(_public_app, internal_app, name, upstreams, routes)
         return await registry.enable_extension(extension_repo, name)
 
     @router.post(
@@ -203,11 +203,16 @@ def setup_extensions(app: FastAPI) -> None:
 
 
 async def hydrate_all_routes() -> None:
-    """Re-mounts persisted, enabled extension routes at startup, on both apps."""
+    """Re-mounts persisted, enabled extension routes at startup, on both apps. Also
+    re-fetches every `body_ref` route's upstream OpenAPI schema first (see
+    registry.refresh_ref_schemas), so a route that was `unreachable_ref` when the
+    process last started flips to `upstream_declared` (or vice versa) without a manual
+    PUT, purely by restarting."""
     if _public_app is None:
         return
     async with AsyncSessionLocal() as session:
         extension_repo = get_repository(ExtensionRepository)(session)
+        await registry.refresh_ref_schemas(extension_repo)
         await runtime.load_all_routes(_public_app, internal_app, extension_repo)
 
 

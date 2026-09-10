@@ -61,11 +61,9 @@ class ExtensionUpstream(Base):
 
 
 class ExtensionRoute(Base):
-    """A single route contributed by an extension — enough to mount a live FastAPI route.
-
-    The dynamic per-manifest request signature and the actual upstream dispatch are not
-    implemented yet (both land in a later stage); this row is the persistence target both
-    build on.
+    """A single route contributed by an extension — enough to mount a live FastAPI route,
+    build its dynamic per-manifest `inspect.Signature` (extensions/signature.py), and
+    dispatch it to its upstream (extensions/upstreams/).
     """
 
     __tablename__ = "extension_routes"
@@ -85,9 +83,10 @@ class ExtensionRoute(Base):
     status_code = Column(Integer, nullable=False, default=200)
 
     query_params = Column(JSONB, nullable=False, default=list)
-    body = Column(JSONB, nullable=True)  # literal JSON Schema (validated in a later stage)
+    body = Column(JSONB, nullable=True)  # `declared`: author-supplied schema; `upstream_declared`/`unreachable_ref`: last-fetched snapshot, display-only
     example = Column(JSONB, nullable=True)
-    validation_mode = Column(Text, nullable=True)  # declared | upstream_declared | unreachable_ref | none (set in a later stage)
+    validation_mode = Column(Text, nullable=True)  # declared | upstream_declared | unreachable_ref | none
+    body_ref = Column(Boolean, nullable=False, default=False)  # True: body is fetched from the upstream's own OpenAPI doc, not authored here
 
     required_action = Column(Text, ForeignKey("actions.name"), nullable=True)
     scoped = Column(Boolean, nullable=False, default=False)

@@ -61,6 +61,7 @@ class ExtensionMapper:
             "body": route.body,
             "example": route.example,
             "validation_mode": route.validation_mode,
+            "body_ref": bool(route.body_ref),
             "required_action": route.required_action,
             "scoped": bool(route.scoped),
             "scope_param": route.scope_param,
@@ -180,6 +181,7 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
                     body=route.get("body"),
                     example=route.get("example"),
                     validation_mode=route.get("validation_mode"),
+                    body_ref=bool(route.get("body_ref")),
                     required_action=route.get("required_action"),
                     scoped=bool(route.get("scoped")),
                     scope_param=route.get("scope_param") or "device_name",
@@ -211,6 +213,15 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
             .where(ExtensionRoute.extension_id == extension_id)
         )
         return [ExtensionMapper.route_to_dict(route, upstream_key) for route, upstream_key in result.all()]
+
+    async def update_route_validation(self, route_id: str, validation_mode: str, body: Optional[Dict[str, Any]]) -> None:
+        result = await self._session.execute(select(ExtensionRoute).where(ExtensionRoute.id == route_id))
+        route = result.scalar_one_or_none()
+        if route is None:
+            return
+        route.validation_mode = validation_mode
+        route.body = body
+        await self._session.commit()
 
     # --- RBAC action provenance -------------------------------------------
     async def ensure_action(self, action_name: str, description: str, is_global: bool = True) -> None:

@@ -2,27 +2,38 @@
 actions into the existing RBAC catalog (`actions`/`roles` tables), persists the
 extension + its upstreams/routes, and issues/rotates its keys.
 
-Owns *what* a registration means, not *how* a route runs (that's runtime.py) or
-how it's dispatched to an upstream or bound to a dynamic FastAPI signature (both
-will be implemented in a later stage). Every function here is a plain async function
-taking the repositories it needs as parameters — no module-level state — so it can be
-exercised the same way from the management router (DI) or from tests.
+Owns *what* a registration means, not *how* a route runs (that's runtime.py) or how
+it's bound to a dynamic FastAPI signature (a later stage's scope). Every function here
+is a plain async function taking the repositories it needs as parameters — no
+module-level state — so it can be exercised the same way from the management router
+(DI) or from tests.
 """
 
-from typing import List
+import logging
+from typing import Dict, List, Optional, Tuple
+
+from jsonschema.exceptions import SchemaError
 
 from db.repos.extension import ExtensionRepository
 from db.repos.role import RoleRepository
 from exceptions import APIError
 
-from .schemas import ExtensionDetail, ExtensionRegistration
+from . import body_validation
+from .schemas import ExtensionRegistration, ExtensionDetail, RouteSpec, UpstreamSpec
 from .security import generate_key, hash_key
+from .upstreams import http as http_upstream
+from .upstreams.iotedge import probe_registration_health
+
+logger = logging.getLogger("EdgeConfigAPI")
 
 
 def _validate_manifest_cross_references(registration: ExtensionRegistration) -> None:
     """Manifest-wide rules `schemas.py` can't express on its own (it validates each field
-    in isolation): a route's `upstream` must exist, and the fields it carries must match
-    that upstream's type."""
+    in isolation): a route's `upstream` must exist, the fields it carries must match that
+    upstream's type, and a `declared`-mode `body`/`example` pair must actually be a valid
+    JSON Schema and a conforming example. No network calls happen here — resolving a
+    `body_ref` against its upstream's live OpenAPI doc is `_resolve_route_validation`'s
+    job, run separately by `_persist_manifest`."""
     for route in registration.routes:
         upstream = registration.upstreams.get(route.upstream)
         if upstream is None:
@@ -34,13 +45,87 @@ def _validate_manifest_cross_references(registration: ExtensionRegistration) -> 
         if upstream.type == "iotedge" and route.iotedge is None:
             raise APIError(f"Route '{route.path}' targets an iotedge upstream but has no iotedge call spec", 422)
 
+        if route.body_ref and upstream.type != "http":
+            raise APIError(
+                f"Route '{route.path}' sets body_ref but its upstream '{route.upstream}' is not an http upstream", 422
+            )
+
+        if route.body is not None and route.body_ref:
+            raise APIError(f"Route '{route.path}' cannot set both 'body' (declared schema) and 'body_ref'", 422)
+
+        if route.body is not None:
+            try:
+                body_validation.check_schema(route.body)
+            except SchemaError as exc:
+                raise APIError(f"Route '{route.path}' body is not a valid JSON Schema: {exc.message}", 422)
+            if route.example is not None:
+                errors = body_validation.validate_once(route.body, route.example)
+                if errors:
+                    raise APIError(
+                        f"Route '{route.path}' example does not conform to its own body schema: {errors}", 422
+                    )
+
+
+async def _resolve_route_validation(
+    route: RouteSpec, upstreams: Dict[str, UpstreamSpec]
+) -> Tuple[str, Optional[dict]]:
+    """Computes a route's `validation_mode` and the `body` snapshot to persist for it —
+    the literal author-supplied schema for `declared`, a fetched-and-resolved snapshot
+    (display-only, never used for enforcement) for `upstream_declared`, `None` for
+    `unreachable_ref`/`none`. The only step in registration that makes a network call."""
+    if route.body is not None:
+        return "declared", route.body
+    if route.body_ref:
+        upstream = upstreams[route.upstream]
+        fetched = await http_upstream.fetch_body_schema(upstream.base_url, route.upstream_path, route.method)
+        return ("upstream_declared", fetched) if fetched is not None else ("unreachable_ref", None)
+    return "none", None
+
 
 async def _persist_manifest(extension_repo: ExtensionRepository, registration: ExtensionRegistration) -> None:
     upstreams = [
         {"key": key, **spec.model_dump()} for key, spec in registration.upstreams.items()
     ]
-    routes = [route.model_dump() for route in registration.routes]
+    routes = []
+    for route in registration.routes:
+        route_dict = route.model_dump()
+        validation_mode, body_snapshot = await _resolve_route_validation(route, registration.upstreams)
+        route_dict["validation_mode"] = validation_mode
+        route_dict["body"] = body_snapshot
+        routes.append(route_dict)
     await extension_repo.replace_upstreams_and_routes(registration.name, upstreams, routes)
+
+
+async def refresh_ref_schemas(extension_repo: ExtensionRepository) -> None:
+    """Re-fetches every `body_ref` route's upstream OpenAPI schema — called once at
+    startup (never per-request, never a background scheduler), flipping
+    `unreachable_ref <-> upstream_declared` as the upstream's own reachability changes.
+    The fetched schema is stored as a display-only snapshot, never used for request-time
+    enforcement (that only ever reads `declared`-mode schemas)."""
+    for ext in await extension_repo.list_extensions_rows():
+        upstream_by_key = {u["key"]: u for u in await extension_repo.list_upstreams(ext["name"])}
+        for route in await extension_repo.list_routes(ext["name"]):
+            if not route.get("body_ref"):
+                continue
+            upstream = upstream_by_key.get(route["upstream"])
+            if upstream is None or upstream.get("type") != "http":
+                continue
+            fetched = await http_upstream.fetch_body_schema(upstream["base_url"], route["upstream_path"], route["method"])
+            mode = "upstream_declared" if fetched is not None else "unreachable_ref"
+            await extension_repo.update_route_validation(route["id"], mode, fetched)
+
+
+async def _probe_iotedge_upstreams(registration: ExtensionRegistration) -> None:
+    """Best-effort registration-time typo guard: for every `iotedge` upstream with a
+    `health_device_query` set, resolve a canary device and confirm `module_name` shows
+    up in its reported `$edgeAgent` modules — logged as a warning, never rejects
+    registration (see extensions/upstreams/iotedge.py's probe_registration_health)."""
+    for key, upstream in registration.upstreams.items():
+        if upstream.type != "iotedge" or not upstream.health_device_query:
+            continue
+        warning = await probe_registration_health(upstream.module_name, upstream.health_device_query)
+        if warning:
+            logger.warning(f"Extension '{registration.name}' upstream '{key}': {warning}")
 
 
 async def _enroll_actions(
@@ -110,8 +195,9 @@ async def register_extension(
         raise APIError(f"Extension '{registration.name}' is already registered", 409)
 
     await extension_repo.create_extension(registration.name, registration.description)
-    await _persist_manifest(extension_repo, registration)
     await _enroll_actions(extension_repo, role_repo, registration)
+    await _persist_manifest(extension_repo, registration)
+    await _probe_iotedge_upstreams(registration)
 
     return await _build_detail(extension_repo, registration.name)
 
@@ -144,11 +230,14 @@ async def replace_extension(
             )
 
     await extension_repo.set_description(name, registration.description)
-    await _persist_manifest(extension_repo, registration)
 
+    # A route's required_action FK depends on the action row already existing, so
+    # actions must be (re-)enrolled before the new routes referencing them are persisted.
     await extension_repo.clear_extension_actions(name)
     await _enroll_actions(extension_repo, role_repo, registration)
+    await _persist_manifest(extension_repo, registration)
     await extension_repo.delete_orphaned_actions(list(old_actions - new_actions))
+    await _probe_iotedge_upstreams(registration)
 
     return await _build_detail(extension_repo, name)
 

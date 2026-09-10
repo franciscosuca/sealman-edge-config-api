@@ -62,6 +62,13 @@ class ExtensionRepository(ABC):
     async def list_routes(self, name: str) -> List[Dict[str, Any]]:
         pass
 
+    @abstractmethod
+    async def update_route_validation(self, route_id: str, validation_mode: str, body: Optional[Dict[str, Any]]) -> None:
+        """Updates one route's `validation_mode`/`body` snapshot in place — used by the
+        startup `upstream_declared`/`unreachable_ref` re-fetch, which must not disturb
+        any other persisted route field."""
+        pass
+
     # --- RBAC action provenance -------------------------------------------
     @abstractmethod
     async def ensure_action(self, action_name: str, description: str, is_global: bool = True) -> None:
