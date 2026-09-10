@@ -133,3 +133,12 @@ SEMS_DEVICE_TEMPLATE_VARIABLES = {
     "container_registry_credentials_encoded": CONTAINER_REGISTRY_CREDENTIALS_ENCODED,
     "sems_device_url": SEMS_DEVICE_URL,
 }
+
+# Extension system - internal (service-to-service) side app. Bind address stays
+# 0.0.0.0 by design (see doc/architecture.md); never publish this port to a host
+# mapping or reverse-proxy rule - see README's "Extension system side apps" section.
+# The field-ingress (device -> module) side app is deliberately not implemented yet -
+# skipped for the whole effort, not just deferred (see IMPLEMENTATION-LOG.md).
+EXTENSIONS_ENABLED = os.getenv("EXTENSIONS_ENABLED", "true").lower() == "true"
+EXTENSIONS_INTERNAL_API_HOST = os.getenv("EXTENSIONS_INTERNAL_API_HOST", "0.0.0.0")
+EXTENSIONS_INTERNAL_API_PORT = int(os.getenv("EXTENSIONS_INTERNAL_API_PORT", "8500"))

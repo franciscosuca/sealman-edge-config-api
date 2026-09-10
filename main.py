@@ -27,6 +27,7 @@ from db.repos.device import DeviceRepository
 from exceptions import APIError
 from db.session import AsyncSessionLocal, get_repository
 from db.migration import run_migrations
+from extensions import hydrate_all_routes, setup_extensions, start_side_apps
 from periodic_task import create_periodic_task
 from routers.devices.routes.get_devices import populate_cache_from_iot_hub_query
 from routers.smart_ems.password_renewal_task_processor import (
@@ -119,6 +120,9 @@ async def lifespan(_: FastAPI):
         )
     )
 
+    await hydrate_all_routes()
+    background_tasks.update(start_side_apps())
+
     yield
 
     if jwks_refresh_task is not None:
@@ -194,6 +198,9 @@ app.include_router(network_discovery)
 app.include_router(lines)
 app.include_router(platform_config)
 app.include_router(devices)
+
+# Static /extensions management API — dynamic per-extension routes land in a later stage
+setup_extensions(app)
 
 
 # Register docs routes as plain Starlette routes so they bypass the global JWT dependency

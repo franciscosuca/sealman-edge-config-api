@@ -56,6 +56,34 @@ python main.py
 
 OpenAPI docs: <http://localhost:5000/docs>
 
+## Extension system side apps
+
+Alongside the public app, the extension system starts one additional,
+independent ASGI app as an `asyncio` task on the same event loop as the
+public app's own `lifespan` — not an `app.mount()` sub-app, not a separate
+process:
+
+| App | Purpose | Env vars | Default |
+|---|---|---|---|
+| Internal | Service-to-service router for an extension's own microservice to call back into, authenticated via `X-Internal-Key` | `EXTENSIONS_INTERNAL_API_HOST` / `EXTENSIONS_INTERNAL_API_PORT` | `0.0.0.0:8500` |
+
+**The field-ingress side app (device → extension-module ingress, `X-Device-Key`
+auth) is deliberately skipped for the whole implementation effort for now, not
+just deferred to a later stage** — see `.mervin/IMPLEMENTATION-LOG.md`. No
+`EXTENSIONS_FIELD_API_*` env vars, no device-key DB schema/routes exist yet.
+
+Set `EXTENSIONS_ENABLED=false` to skip starting the side app (the static
+`/extensions` management API on the public app is unaffected either way).
+
+**Never publish this port to a host port mapping, and never add a
+reverse-proxy/ingress rule that routes external traffic to it.** It binds
+`0.0.0.0` because its real callers are other containers on the same
+Docker/Kubernetes network (loopback would make it unreachable by anything,
+including its intended callers) — network isolation must come from
+deployment config (a dedicated internal network / `NetworkPolicy`), not the
+bind address.
+
+
 ## Further documentation
 
 | Topic | File |
