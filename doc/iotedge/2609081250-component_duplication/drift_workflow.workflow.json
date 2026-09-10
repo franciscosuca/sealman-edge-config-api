@@ -1,0 +1,86 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "IoT Hub Transport Logic Drift Workflow",
+    "output": "doc/iotedge/2609081250/drift_workflow.html",
+    "quality_profile": "showcase",
+    "animation": "trace",
+    "viewBox": [1180, 676],
+    "views": [
+      {
+        "id": "extension-flow",
+        "label": "Extension Dispatch Path",
+        "focus": ["user_req", "api_router", "ext_transport", "iothub", "ext_response", "user_reply"],
+        "note": "Follow the modern extension path with 45s hardcoded timeout and typed IoTBackendAPIError parsing."
+      },
+      {
+        "id": "legacy-flow",
+        "label": "Legacy Routers Path",
+        "focus": ["user_req", "api_router", "legacy_routes", "iothub", "legacy_response", "user_reply"],
+        "note": "Follow the legacy path with dynamic timeout calculation and manual exception/status code handling."
+      },
+      {
+        "id": "drift-comparison",
+        "label": "Logic Drift Divergence",
+        "focus": ["ext_transport", "legacy_routes", "ext_response", "legacy_response"],
+        "note": "Compare how timeout configuration and response contracts diverge across the two paths."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "api_entry", "label": "Client & API Gateway" },
+    { "id": "extension_lane", "label": "Extensions Transport" },
+    { "id": "legacy_lane", "label": "Legacy Implementations", "variant": "exception" },
+    { "id": "upstream_lane", "label": "Azure IoT Hub" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "Request Intake", "fromCol": 0, "toCol": 1 },
+    { "id": "divergence", "label": "Transport Divergence", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "resolution", "label": "Response Resolution", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "ext_logic", "label": "Extensions Logic", "lane": "extension_lane", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "legacy_logic", "label": "Legacy Logic", "lane": "legacy_lane", "fromCol": 2, "toCol": 4, "variant": "security" }
+  ],
+  "mainPath": ["user_req", "api_router", "ext_transport", "iothub", "ext_response", "user_reply"],
+  "nodes": [
+    { "id": "user_req", "lane": "api_entry", "col": 0, "type": "external", "label": "User Request", "sublabel": "API client call", "width": 132 },
+    { "id": "api_router", "lane": "api_entry", "col": 1, "type": "backend", "label": "API Router", "sublabel": "endpoint routing", "width": 132 },
+    { "id": "ext_transport", "lane": "extension_lane", "col": 2, "type": "backend", "label": "iotedge_transport", "sublabel": "fixed 45s timeout", "tag": "hardcoded 45s", "width": 132 },
+    { "id": "legacy_routes", "lane": "legacy_lane", "col": 2, "type": "backend", "label": "Legacy Routers", "sublabel": "dynamic timeout", "tag": "calculated", "width": 132 },
+    { "id": "iothub", "lane": "upstream_lane", "col": 3, "type": "cloud", "label": "Azure IoT Hub", "sublabel": "REST /twins API", "width": 132 },
+    { "id": "ext_response", "lane": "extension_lane", "col": 4, "type": "backend", "label": "Typed JSON", "sublabel": "IoTBackendAPIError", "tag": "typed error", "width": 132 },
+    { "id": "legacy_response", "lane": "legacy_lane", "col": 4, "type": "security", "label": "Manual Parsing", "sublabel": "HTTPException / tuple", "tag": "untyped error", "width": 132 },
+    { "id": "user_reply", "lane": "api_entry", "col": 5, "type": "external", "label": "User Reply", "sublabel": "divergent response", "width": 132 }
+  ],
+  "edges": [
+    { "id": "req-to-router", "from": "user_req", "to": "api_router", "variant": "default" },
+    { "id": "router-to-ext", "from": "api_router", "to": "ext_transport", "label": "extension path", "variant": "emphasis" },
+    { "id": "router-to-legacy", "from": "api_router", "to": "legacy_routes", "label": "legacy path", "variant": "security", "role": "branch" },
+    { "id": "ext-to-hub", "from": "ext_transport", "to": "iothub", "label": "timeout=45s", "variant": "default" },
+    { "id": "legacy-to-hub", "from": "legacy_routes", "to": "iothub", "label": "dynamic timeout", "variant": "dashed" },
+    { "id": "hub-to-ext-resp", "from": "iothub", "to": "ext_response", "label": "200 / 404", "variant": "emphasis", "role": "return" },
+    { "id": "hub-to-legacy-resp", "from": "iothub", "to": "legacy_response", "label": "raw status", "variant": "dashed", "role": "return" },
+    { "id": "ext-resp-to-user", "from": "ext_response", "to": "user_reply", "label": "parsed JSON", "variant": "emphasis" },
+    { "id": "legacy-resp-to-user", "from": "legacy_response", "to": "user_reply", "label": "raw tuple", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Transport Divergence",
+      "items": [
+        "Extensions use fixed 45s timeout; routers calculate dynamic timeouts",
+        "Extensions raise typed IoTBackendAPIError; routers return raw status tuples"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Operational Risk",
+      "items": [
+        "Inconsistent error schemas and status codes leak to API clients",
+        "Dual implementations multiply maintenance and testing overhead"
+      ]
+    }
+  ]
+}

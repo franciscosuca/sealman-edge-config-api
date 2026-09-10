@@ -16,3 +16,6 @@ env-var-local.json
 /doc/testserver
 run_docker.bat
 uv.lock
+.github/
+.agents/
+.pi/

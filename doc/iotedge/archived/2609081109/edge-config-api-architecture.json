@@ -1,0 +1,339 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Edge Configuration API Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/eclipse-sealman/sealman-edge-config-api.git",
+      "revision": "1f069a0f7a8beadd513e4f31091cc4f8d3a25357"
+    },
+    "viewBox": [1040, 500]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [55, 50],
+    "cols": 6,
+    "gapX": 65,
+    "gapY": 60,
+    "cellW": 95,
+    "cellH": 72
+  },
+  "components": [
+    {
+      "id": "edge_ui",
+      "type": "frontend",
+      "label": "Clients",
+      "sublabel": "HTTPS callers",
+      "size": [95, 68],
+      "tag": "external",
+      "sources": [
+        { "path": "README.md", "line": 1, "end_line": 3 },
+        { "path": "doc/architecture.md", "line": 18, "end_line": 18 }
+      ],
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "public_api",
+      "type": "backend",
+      "label": "FastAPI API",
+      "sublabel": "REST • port 5000",
+      "size": [95, 68],
+      "tag": "owned",
+      "sources": [
+        { "path": "main.py", "line": 143, "end_line": 158 },
+        { "path": "main.py", "line": 189, "end_line": 203 }
+      ],
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "authorization",
+      "type": "security",
+      "label": "Authorization",
+      "sublabel": "JWT • policy",
+      "size": [95, 68],
+      "tag": "policy gate",
+      "sources": [
+        { "path": "main.py", "line": 143, "end_line": 150 },
+        { "path": "authorization/abac_permission_check.py", "line": 1, "end_line": 15 },
+        { "path": "auth.py", "line": 19, "end_line": 20 }
+      ],
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "config_orchestrator",
+      "type": "backend",
+      "label": "Config Flow",
+      "sublabel": "desired twin handoff",
+      "size": [95, 68],
+      "tag": "async handoff",
+      "sources": [
+        { "path": "doc/architecture.md", "line": 9, "end_line": 28 },
+        { "path": "routers/module_config/router.py", "line": 1, "end_line": 20 }
+      ],
+      "row": 1,
+      "col": 3
+    },
+    {
+      "id": "blob_storage",
+      "type": "cloud",
+      "label": "Blob Storage",
+      "sublabel": "JSON + SAS URL",
+      "size": [95, 68],
+      "tag": "managed",
+      "sources": [
+        { "path": "doc/architecture.md", "line": 5, "end_line": 7 },
+        { "path": "blob_service.py", "line": 1, "end_line": 20 }
+      ],
+      "row": 2,
+      "col": 3
+    },
+    {
+      "id": "iot_hub",
+      "type": "cloud",
+      "label": "IoT Hub",
+      "sublabel": "module twins",
+      "size": [95, 68],
+      "tag": "managed",
+      "sources": [
+        { "path": "doc/architecture.md", "line": 5, "end_line": 7 },
+        { "path": "doc/architecture.md", "line": 56, "end_line": 87 }
+      ],
+      "row": 1,
+      "col": 4
+    },
+    {
+      "id": "edge_modules",
+      "type": "external",
+      "label": "Edge Modules",
+      "sublabel": "apply + report",
+      "size": [95, 68],
+      "tag": "field runtime",
+      "sources": [
+        { "path": "doc/architecture.md", "line": 30, "end_line": 40 },
+        { "path": "doc/architecture.md", "line": 56, "end_line": 73 }
+      ],
+      "row": 1,
+      "col": 5
+    },
+    {
+      "id": "oidc_provider",
+      "type": "security",
+      "label": "OIDC",
+      "sublabel": "Entra ID / Keycloak",
+      "size": [95, 68],
+      "tag": "external identity",
+      "sources": [
+        { "path": "README.md", "line": 7, "end_line": 9 },
+        { "path": "doc/authentication.md", "line": 1, "end_line": 30 }
+      ],
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "extension_runtime",
+      "type": "backend",
+      "label": "Extensions",
+      "sublabel": "dynamic routes",
+      "size": [95, 68],
+      "tag": "dynamic routes",
+      "sources": [
+        { "path": "extensions/setup.py", "line": 70, "end_line": 82 },
+        { "path": "extensions/setup.py", "line": 183, "end_line": 197 },
+        { "path": ".env.example", "line": 99, "end_line": 106 }
+      ],
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "users + metadata",
+      "size": [95, 68],
+      "tag": "system of record",
+      "sources": [
+        { "path": "docker-compose.local.yaml", "line": 1, "end_line": 22 },
+        { "path": "db/session.py", "line": 1, "end_line": 30 }
+      ],
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Client boundary",
+      "wraps": ["edge_ui"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Identity boundary",
+      "wraps": ["oidc_provider"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Sealman API boundary",
+      "wraps": ["public_api", "authorization", "config_orchestrator", "extension_runtime"],
+      "pad": 30
+    },
+    {
+      "kind": "security-group",
+      "label": "Managed storage boundary",
+      "wraps": ["postgres", "blob_storage"],
+      "pad": 30
+    },
+    {
+      "kind": "security-group",
+      "label": "IoT Hub boundary",
+      "wraps": ["iot_hub"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Edge site boundary",
+      "wraps": ["edge_modules"],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    {
+      "id": "request_to_api",
+      "from": "edge_ui",
+      "to": "public_api",
+      "label": "HTTPS",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "auto"
+    },
+    {
+      "id": "oidc_to_auth",
+      "from": "oidc_provider",
+      "to": "authorization",
+      "label": "OIDC / JWKS",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "labelAt": [382, 165]
+    },
+    {
+      "id": "api_to_auth",
+      "from": "public_api",
+      "to": "authorization",
+      "label": "JWT",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "auto"
+    },
+    {
+      "id": "auth_to_config",
+      "from": "authorization",
+      "to": "config_orchestrator",
+      "label": "authorize",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "auto"
+    },
+    {
+      "id": "config_to_blob",
+      "from": "config_orchestrator",
+      "to": "blob_storage",
+      "label": "upload",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "labelAt": [542, 270]
+    },
+    {
+      "id": "config_to_iothub",
+      "from": "config_orchestrator",
+      "to": "iot_hub",
+      "label": "twin",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "route": "auto"
+    },
+    {
+      "id": "twin_to_edge",
+      "from": "iot_hub",
+      "to": "edge_modules",
+      "label": "sync",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "auto"
+    },
+    {
+      "id": "auth_to_postgres",
+      "from": "authorization",
+      "to": "postgres",
+      "label": "policy",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "labelAt": [382, 270]
+    },
+    {
+      "id": "api_to_extensions",
+      "from": "public_api",
+      "to": "extension_runtime",
+      "label": "mount routes",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "labelDy": 24
+    },
+    {
+      "id": "extensions_to_postgres",
+      "from": "extension_runtime",
+      "to": "postgres",
+      "label": "persist",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "auto"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Primary Request Path",
+      "items": [
+        "A caller submits a module configuration through the public FastAPI surface",
+        "JWT validation and RBAC/ABAC authorization gate the operation",
+        "The API stores the payload, writes desired twin state, and returns before field application completes"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Trust Boundaries",
+      "items": [
+        "Caller and OIDC provider are outside the Sealman API ownership boundary",
+        "Dynamic extensions expose separate public, internal, and field surfaces",
+        "IoT Hub owns desired state; edge modules apply configuration and report status"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Supporting Runtime Detail",
+      "items": [
+        "Edge modules fetch the referenced JSON from Blob Storage after twin synchronization",
+        "Startup runs migrations, hydrates persisted extension routes, and refreshes identity keys",
+        "Periodic tasks refresh the device cache and process password-renewal work"
+      ]
+    }
+  ]
+}
