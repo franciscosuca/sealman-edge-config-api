@@ -11,7 +11,7 @@ call sites mixing in `2020-05-31-preview` are out of scope for this module to re
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -147,6 +147,43 @@ async def dispatch(request: Request, upstream: Dict[str, Any], route: Dict[str, 
     return await _direct_method(device_id, module_name, route["method_name"], payload)
 
 
+async def _resolve_canary_agent_modules(health_device_query: str) -> Optional[Tuple[str, dict]]:
+    """Resolves one canary device via the given IoT Hub device-query/target-condition
+    string, then reads its `$edgeAgent` twin's reported modules map. Returns `(device_id,
+    modules)` or `None` if the query fails, resolves to zero devices, or the twin can't be
+    read — never raises. Shared by both the registration-time typo guard
+    (`probe_registration_health`) and the periodic health status (`check_module_health`),
+    which read this exact `properties.reported.modules` shape, never `configurations.*.status`
+    (that reflects deployment-apply success/failure, not whether the module is actually
+    present/running on the device)."""
+    query_responses: Dict[str, Any] = {}
+    query_url = f"https://{IOT_HUB_NAME}/devices/query?api-version={_API_VERSION}"
+    await post_async(
+        query_url,
+        query_responses,
+        _json={"query": f"SELECT deviceId FROM devices WHERE {health_device_query}"},
+        headers={**get_iothub_auth_headers(), "Content-Type": "application/json"},
+        timeout=15,
+    )
+    resp = query_responses[query_url]
+    if resp.status_code != 200:
+        return None
+    devices = resp.json()
+    if not devices:
+        return None
+
+    device_id = devices[0]["deviceId"]
+    agent_responses: Dict[str, Any] = {}
+    agent_url = f"https://{IOT_HUB_NAME}/twins/{device_id}/modules/$edgeAgent?api-version={_API_VERSION}"
+    await get_async(agent_url, agent_responses, headers=get_iothub_auth_headers(), timeout=15)
+    agent_resp = agent_responses[agent_url]
+    if agent_resp.status_code != 200:
+        return None
+
+    modules = (agent_resp.json().get("properties", {}) or {}).get("reported", {}).get("modules", {}) or {}
+    return device_id, modules
+
+
 async def probe_registration_health(module_name: str, health_device_query: str) -> Optional[str]:
     """Best-effort registration-time typo guard for `health_device_query`: resolves one
     canary device via the same IoT Hub device-query syntax used for deployment targeting,
@@ -155,35 +192,11 @@ async def probe_registration_health(module_name: str, health_device_query: str) 
     registration) — a query resolving to zero devices right now is not itself a warning,
     since the canary may legitimately be offline/not-yet-deployed."""
     try:
-        query_responses: Dict[str, Any] = {}
-        query_url = f"https://{IOT_HUB_NAME}/devices/query?api-version={_API_VERSION}"
-        await post_async(
-            query_url,
-            query_responses,
-            _json={"query": f"SELECT deviceId FROM devices WHERE {health_device_query}"},
-            headers={**get_iothub_auth_headers(), "Content-Type": "application/json"},
-            timeout=15,
-        )
-        resp = query_responses[query_url]
-        if resp.status_code != 200:
+        resolved = await _resolve_canary_agent_modules(health_device_query)
+        if resolved is None:
             return None  # can't evaluate right now — not itself a registration-time warning
-        devices = resp.json()
-        if not devices:
-            return None  # query legitimately resolves to zero devices right now
+        device_id, modules = resolved
 
-        device_id = devices[0]["deviceId"]
-        agent_responses: Dict[str, Any] = {}
-        agent_url = f"https://{IOT_HUB_NAME}/twins/{device_id}/modules/$edgeAgent?api-version={_API_VERSION}"
-        await get_async(agent_url, agent_responses, headers=get_iothub_auth_headers(), timeout=15)
-        agent_resp = agent_responses[agent_url]
-        if agent_resp.status_code != 200:
-            return None
-
-        modules = (agent_resp.json().get("properties", {}) or {}).get("reported", {}).get("modules", {}) or {}
-        # Deliberately reads `properties.reported.modules.<name>.runtimeStatus` — the
-        # module's actual reported state — and never `configurations.*.status`, which
-        # reflects deployment-apply success/failure, not whether the module is actually
-        # present/running on the device.
         module_entry = modules.get(module_name)
         if module_entry is None or "runtimeStatus" not in module_entry:
             return (
@@ -194,3 +207,36 @@ async def probe_registration_health(module_name: str, health_device_query: str) 
     except Exception as exc:  # best-effort only — never blocks registration
         logger.warning(f"iotedge registration-time health probe failed, skipping: {exc}")
         return None
+
+
+_HEALTHY_RUNTIME_STATUSES = {"running"}
+_UNHEALTHY_RUNTIME_STATUSES = {"stopped", "failed", "backoff", "unhealthy"}
+
+
+async def check_module_health(module_name: Optional[str], health_device_query: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Health status for one `iotedge` upstream: resolves `health_device_query` to a
+    canary device and reads its `$edgeAgent`-reported `runtimeStatus` for `module_name`
+    (see `_resolve_canary_agent_modules`). `unknown` (never `healthy`/`unhealthy`) whenever
+    the query isn't configured, resolves to zero devices, or the canary's twin can't be
+    read — an unreachable canary is not evidence the module itself is unhealthy."""
+    if not health_device_query:
+        return "unknown", "No health_device_query configured for this upstream"
+    try:
+        resolved = await _resolve_canary_agent_modules(health_device_query)
+        if resolved is None:
+            return "unknown", "health_device_query resolved to zero devices, or its canary's twin could not be read"
+        device_id, modules = resolved
+
+        module_entry = modules.get(module_name)
+        if module_entry is None or "runtimeStatus" not in module_entry:
+            return "unknown", f"Canary device '{device_id}' has no reported runtimeStatus for module '{module_name}'"
+
+        runtime_status = module_entry["runtimeStatus"]
+        if runtime_status in _HEALTHY_RUNTIME_STATUSES:
+            return "healthy", None
+        if runtime_status in _UNHEALTHY_RUNTIME_STATUSES:
+            return "unhealthy", f"Canary device '{device_id}' reports module '{module_name}' runtimeStatus='{runtime_status}'"
+        return "unknown", f"Canary device '{device_id}' reports unrecognized runtimeStatus='{runtime_status}' for module '{module_name}'"
+    except Exception as exc:  # best-effort only — never raises out of a health check
+        logger.warning(f"iotedge health check failed for module '{module_name}': {exc}")
+        return "unknown", f"Health check errored: {exc}"

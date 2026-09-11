@@ -28,6 +28,7 @@ def _unique_name(prefix: str) -> str:
 
 def _sample_registration(name: str, visibility: str = "public") -> dict:
     return {
+        "schema_version": 1,
         "name": name,
         "description": "Demo extension for tests",
         "upstreams": {
@@ -217,6 +218,51 @@ class TestExtensionsManagementRoutesAsAdmin:
         replacement["routes"][0]["required_action"] = f"{name}.write"
         replace_response = await client.put(f"/extensions/{name}", json=replacement)
         assert replace_response.status_code == 200
+
+
+class TestExtensionRegistrationSchemaVersion:
+    """Phase 6: `schema_version` is required on ExtensionRegistration, and
+    `GET /extensions/schema` publishes its JSON Schema live."""
+
+    async def test_schema_route_is_reachable_and_requires_schema_version(self, client):
+        response = await client.get("/extensions/schema")
+        assert response.status_code == 200
+        schema = response.json()
+        assert "schema_version" in schema["required"]
+        assert schema["properties"]["schema_version"]["const"] == 1
+
+    async def test_register_without_schema_version_is_never_persisted(self, client):
+        name = _unique_name("no_schema_version_ext")
+        registration = _sample_registration(name)
+        del registration["schema_version"]
+
+        response = await client.post("/extensions", json=registration)
+        assert response.status_code != 201
+        assert (await client.get(f"/extensions/{name}")).status_code == 404
+
+    async def test_register_with_unrecognized_schema_version_is_never_persisted(self, client):
+        name = _unique_name("bad_schema_version_ext")
+        registration = _sample_registration(name)
+        registration["schema_version"] = 2
+
+        response = await client.post("/extensions", json=registration)
+        assert response.status_code != 201
+        assert (await client.get(f"/extensions/{name}")).status_code == 404
+
+    async def test_register_and_get_and_replace_round_trip_schema_version(self, client):
+        name = _unique_name("schema_version_ext")
+        registration = _sample_registration(name)
+
+        register_response = await client.post("/extensions", json=registration)
+        assert register_response.status_code == 201
+        assert register_response.json()["schema_version"] == 1
+
+        get_response = await client.get(f"/extensions/{name}")
+        assert get_response.json()["schema_version"] == 1
+
+        replace_response = await client.put(f"/extensions/{name}", json=registration)
+        assert replace_response.status_code == 200
+        assert replace_response.json()["schema_version"] == 1
 
 
 class TestExtensionsManagementRoutesAuthorization:

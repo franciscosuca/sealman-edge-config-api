@@ -134,6 +134,25 @@ def add_routes_from_specs(
         tags = list(route.get("tags") or []) + [f"Extension: {extension_name}"]
         method = route.get("method") or "GET"
 
+        # Documents the route's raw JSON Schema body in /openapi.json only — merged
+        # verbatim into the generated Operation Object, never bound as a native
+        # FastAPI Body(...) param (see signature.py). Covers both `declared` (author-
+        # supplied) and `upstream_declared` (fetched-from-upstream) bodies, since both
+        # populate route["body"]; `none`/`unreachable_ref` routes leave this None.
+        openapi_extra = None
+        if route.get("body"):
+            openapi_extra = {
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": route["body"],
+                            **({"example": route["example"]} if route.get("example") else {}),
+                        }
+                    },
+                }
+            }
+
         target_app.add_api_route(
             route["path"],
             _dispatch_handler(extension_name, upstream, route),
@@ -147,6 +166,7 @@ def add_routes_from_specs(
             operation_id=_operation_id(extension_name, method, route["path"]),
             dependencies=dependencies,
             include_in_schema=True,
+            openapi_extra=openapi_extra,
         )
         logger.info(f"Mounted extension route: {extension_name} {method} {route['path']} ({visibility})")
 

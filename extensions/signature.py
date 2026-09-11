@@ -9,7 +9,9 @@ JSON Schema, not a compiled Pydantic model, so it stays a `Request`-level concer
 once and validated by extensions/body_validation.py — this module never binds a native
 `Body(...)` parameter. The route's auth (`ABACPermissionCheck` / `X-Internal-Key`)
 likewise stays wired the existing, already-tested way — as a `dependencies=[...]` entry
-on `add_api_route`, not folded into this signature.
+on `add_api_route`, not folded into this signature. (`extensions/runtime.py` separately
+passes `openapi_extra` to `add_api_route` to document the body's JSON Schema in
+/openapi.json purely for documentation — that never touches this signature either.)
 """
 
 import inspect

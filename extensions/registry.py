@@ -9,7 +9,9 @@ module-level state — so it can be exercised the same way from the management r
 (DI) or from tests.
 """
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from jsonschema.exceptions import SchemaError
@@ -18,8 +20,8 @@ from db.repos.extension import ExtensionRepository
 from db.repos.role import RoleRepository
 from exceptions import APIError
 
-from . import body_validation
-from .schemas import ExtensionRegistration, ExtensionDetail, RouteSpec, UpstreamSpec
+from . import body_validation, health
+from .schemas import ExtensionHealthCheckResult, ExtensionRegistration, ExtensionDetail, RouteSpec, UpstreamSpec
 from .security import generate_key, hash_key
 from .upstreams import http as http_upstream
 from .upstreams.iotedge import probe_registration_health
@@ -174,6 +176,7 @@ async def _build_detail(extension_repo: ExtensionRepository, name: str) -> Exten
     return ExtensionDetail(
         name=ext["name"],
         description=ext["description"],
+        schema_version=ext["schema_version"],
         upstreams=upstreams,
         actions=[{"name": a} for a in actions],
         grant_to_roles=[],
@@ -194,7 +197,7 @@ async def register_extension(
     if await extension_repo.extension_exists(registration.name):
         raise APIError(f"Extension '{registration.name}' is already registered", 409)
 
-    await extension_repo.create_extension(registration.name, registration.description)
+    await extension_repo.create_extension(registration.name, registration.description, registration.schema_version)
     await _enroll_actions(extension_repo, role_repo, registration)
     await _persist_manifest(extension_repo, registration)
     await _probe_iotedge_upstreams(registration)
@@ -230,6 +233,7 @@ async def replace_extension(
             )
 
     await extension_repo.set_description(name, registration.description)
+    await extension_repo.set_schema_version(name, registration.schema_version)
 
     # A route's required_action FK depends on the action row already existing, so
     # actions must be (re-)enrolled before the new routes referencing them are persisted.
@@ -249,6 +253,39 @@ async def get_extension(extension_repo: ExtensionRepository, name: str) -> Exten
 async def list_extensions(extension_repo: ExtensionRepository) -> List[ExtensionDetail]:
     rows = await extension_repo.list_extensions_rows()
     return [await _build_detail(extension_repo, row["name"]) for row in rows]
+
+
+async def check_extension_health(extension_repo: ExtensionRepository, name: str) -> ExtensionHealthCheckResult:
+    """Runs a fresh health check of every one of `name`'s upstreams and persists the
+    result — the sole trigger for a check (a plain `GET` only ever returns whatever was
+    last persisted here). Upstreams are checked concurrently, so this call's latency is
+    bounded by the single slowest upstream check, not their sum. Returns only the
+    per-upstream health fields, not the full manifest (`ExtensionDetail`) — this
+    endpoint's job is reporting health, not re-describing routes/actions/description."""
+    if await extension_repo.get_extension_row(name) is None:
+        raise APIError(f"Extension '{name}' not found", 404)
+
+    upstreams_rows = await extension_repo.list_upstreams(name)
+    if upstreams_rows:
+        checked_at = datetime.now(timezone.utc)
+        results = await asyncio.gather(*(health.check_upstream_health(row) for row in upstreams_rows))
+        for row, (status, detail) in zip(upstreams_rows, results):
+            await extension_repo.record_upstream_health(row["id"], status, detail, checked_at)
+            row["last_status"] = status
+            row["last_detail"] = detail
+            row["last_checked_at"] = checked_at
+
+    return ExtensionHealthCheckResult(
+        name=name,
+        upstreams={
+            row["key"]: {
+                "last_checked_at": row.get("last_checked_at"),
+                "last_status": row["last_status"],
+                "last_detail": row.get("last_detail"),
+            }
+            for row in upstreams_rows
+        },
+    )
 
 
 async def deregister_extension(extension_repo: ExtensionRepository, name: str) -> None:

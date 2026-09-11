@@ -218,3 +218,114 @@ def test_resolve_device_id_missing_raises_400():
     with pytest.raises(HTTPException) as exc_info:
         iotedge._resolve_device_id(request, route)
     assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_unknown_when_no_query_configured():
+    status, detail = await iotedge.check_module_health("my-module", None)
+    assert status == "unknown"
+    assert detail
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_unknown_when_query_resolves_to_zero_devices(monkeypatch):
+    async def fake_post_async(url, responses, _json=None, headers=None, timeout=5):
+        responses[url] = _fake_response(200, [])
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "unknown"
+    assert detail
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_unknown_when_twin_unreadable(monkeypatch):
+    async def fake_post_async(url, responses, _json=None, headers=None, timeout=5):
+        responses[url] = _fake_response(200, [{"deviceId": "canary-1"}])
+
+    async def fake_get_async(url, responses, headers=None, timeout=5):
+        responses[url] = _fake_response(404, text="not found")
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_async", fake_get_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "unknown"
+    assert detail
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_healthy_when_running(monkeypatch):
+    async def fake_post_async(url, responses, _json=None, headers=None, timeout=5):
+        responses[url] = _fake_response(200, [{"deviceId": "canary-1"}])
+
+    async def fake_get_async(url, responses, headers=None, timeout=5):
+        responses[url] = _fake_response(
+            200, {"properties": {"reported": {"modules": {"my-module": {"runtimeStatus": "running"}}}}}
+        )
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_async", fake_get_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "healthy"
+    assert detail is None
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_unhealthy_when_stopped(monkeypatch):
+    async def fake_post_async(url, responses, _json=None, headers=None, timeout=5):
+        responses[url] = _fake_response(200, [{"deviceId": "canary-1"}])
+
+    async def fake_get_async(url, responses, headers=None, timeout=5):
+        responses[url] = _fake_response(
+            200, {"properties": {"reported": {"modules": {"my-module": {"runtimeStatus": "stopped"}}}}}
+        )
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_async", fake_get_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "unhealthy"
+    assert "stopped" in detail
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_unknown_when_module_missing_from_reported_modules(monkeypatch):
+    async def fake_post_async(url, responses, _json=None, headers=None, timeout=5):
+        responses[url] = _fake_response(200, [{"deviceId": "canary-1"}])
+
+    async def fake_get_async(url, responses, headers=None, timeout=5):
+        responses[url] = _fake_response(200, {"properties": {"reported": {"modules": {}}}})
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_async", fake_get_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "unknown"
+    assert detail
+
+
+@pytest.mark.asyncio
+async def test_check_module_health_never_raises_on_exception(monkeypatch):
+    async def fake_post_async(*a, **kw):
+        raise RuntimeError("network exploded")
+
+    monkeypatch.setattr(iotedge, "post_async", fake_post_async)
+    monkeypatch.setattr(iotedge, "get_iothub_auth_headers", lambda: {})
+    monkeypatch.setattr(iotedge, "IOT_HUB_NAME", "myhub.azure-devices.net")
+
+    status, detail = await iotedge.check_module_health("my-module", "tags.env = 'prod'")
+    assert status == "unknown"
+    assert detail

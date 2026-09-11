@@ -4,10 +4,10 @@ Input validation shapes only — no persistence, no business rules (that's regis
 job). Field-level cross-references (e.g. a route's `upstream` key must exist in
 `upstreams`, `iotedge` must be present iff the referenced upstream is `type: "iotedge"`,
 `body_ref` requiring an `http` upstream) are manifest-wide business rules validated by
-registry.py, not enforced here. `schema_version` is a later stage's addition and is
-intentionally not present yet.
+registry.py, not enforced here.
 """
 
+from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
@@ -24,6 +24,18 @@ class HttpUpstreamSpec(BaseModel):
     health_path: str = "/health"
     version_field: str = "version"
     expected_version: Optional[str] = None
+    # Server-computed (extensions/health.py, run only via POST /extensions/{name}/health-check)
+    # — never taken from a client-supplied manifest, present here only so responses surface
+    # the last check's persisted result verbatim (Pydantic silently drops dict keys with no
+    # matching field). A plain GET never refreshes these; it just returns whatever's stored.
+    # Persisted (not ephemeral) deliberately: multiple independent callers (an admin
+    # datatable checking on page visit, a future ops dashboard polling on its own
+    # schedule) all read/write the same last-known value instead of each needing their
+    # own cache. There's no server-side expiry — `last_checked_at`'s age is the staleness
+    # signal; how stale is "too stale" is a per-consumer judgment call, not the API's.
+    last_checked_at: Optional[datetime] = None
+    last_status: Literal["unknown", "healthy", "unhealthy"] = "unknown"
+    last_detail: Optional[str] = None
 
 
 class IotedgeUpstreamSpec(BaseModel):
@@ -35,6 +47,10 @@ class IotedgeUpstreamSpec(BaseModel):
     # decommissioned/renamed canary doesn't permanently break health as long as a
     # replacement still matches.
     health_device_query: Optional[str] = None
+    # Server-computed, see HttpUpstreamSpec's identical fields above — same caveats apply.
+    last_checked_at: Optional[datetime] = None
+    last_status: Literal["unknown", "healthy", "unhealthy"] = "unknown"
+    last_detail: Optional[str] = None
 
 
 UpstreamSpec = Annotated[Union[HttpUpstreamSpec, IotedgeUpstreamSpec], Field(discriminator="type")]
@@ -95,6 +111,11 @@ class RouteSpec(BaseModel):
 
 
 class ExtensionRegistration(BaseModel):
+    # Required, no default: a missing or unrecognized value (anything but the literal
+    # `1`) is rejected outright rather than guessed at, mirroring $edgeAgent's own
+    # schemaVersion convention. Extend to Literal[1, 2] (not widen to a plain int) the
+    # day a second manifest shape actually exists.
+    schema_version: Literal[1]
     name: str
     description: str = ""
     upstreams: Dict[str, UpstreamSpec]
@@ -105,6 +126,17 @@ class ExtensionRegistration(BaseModel):
 
 class ExtensionDetail(ExtensionRegistration):
     enabled: bool = False
+
+
+class UpstreamHealthStatus(BaseModel):
+    last_checked_at: Optional[datetime] = None
+    last_status: Literal["unknown", "healthy", "unhealthy"] = "unknown"
+    last_detail: Optional[str] = None
+
+
+class ExtensionHealthCheckResult(BaseModel):
+    name: str
+    upstreams: Dict[str, UpstreamHealthStatus]
 
 
 class InternalKeyRotateResponse(BaseModel):

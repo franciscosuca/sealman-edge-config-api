@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -16,7 +17,7 @@ class ExtensionRepository(ABC):
         pass
 
     @abstractmethod
-    async def create_extension(self, name: str, description: str) -> Dict[str, Any]:
+    async def create_extension(self, name: str, description: str, schema_version: int) -> Dict[str, Any]:
         """Raises ValueError if an extension with this name already exists."""
         pass
 
@@ -30,6 +31,10 @@ class ExtensionRepository(ABC):
 
     @abstractmethod
     async def set_description(self, name: str, description: str) -> None:
+        pass
+
+    @abstractmethod
+    async def set_schema_version(self, name: str, schema_version: int) -> None:
         pass
 
     @abstractmethod
@@ -60,6 +65,15 @@ class ExtensionRepository(ABC):
 
     @abstractmethod
     async def list_routes(self, name: str) -> List[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    async def record_upstream_health(
+        self, upstream_id: str, status: str, detail: Optional[str], checked_at: datetime
+    ) -> None:
+        """Persists one upstream's most recent health-check result. Silently a no-op if
+        `upstream_id` no longer exists (e.g. the extension was replaced/deregistered
+        concurrently with the check that produced this result)."""
         pass
 
     @abstractmethod

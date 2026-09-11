@@ -88,6 +88,7 @@ def mock_http_upstream() -> Generator[str, None, None]:
 
 def _registration(name: str, base_url: str, upstream_path: str = "/ping", method: str = "GET") -> dict:
     return {
+        "schema_version": 1,
         "name": name,
         "description": "dispatch test",
         "upstreams": {"svc": {"type": "http", "base_url": base_url}},

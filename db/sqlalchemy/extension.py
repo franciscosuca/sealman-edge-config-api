@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ class ExtensionMapper:
         return {
             "name": ext.name,
             "description": ext.description or "",
+            "schema_version": ext.schema_version,
             "enabled": bool(ext.enabled),
             "internal_key_hash": ext.internal_key_hash,
             "created_at": ext.created_at,
@@ -90,11 +92,17 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
         result = await self._session.execute(select(Extension.name).where(Extension.name == name))
         return result.scalar_one_or_none() is not None
 
-    async def create_extension(self, name: str, description: str) -> Dict[str, Any]:
+    async def create_extension(self, name: str, description: str, schema_version: int) -> Dict[str, Any]:
         if await self.extension_exists(name):
             raise ValueError(f"Extension '{name}' is already registered")
 
-        ext = Extension(name=name, description=description, enabled=False, internal_key_hash=None)
+        ext = Extension(
+            name=name,
+            description=description,
+            schema_version=schema_version,
+            enabled=False,
+            internal_key_hash=None,
+        )
         self._session.add(ext)
         await self._session.commit()
         await self._session.refresh(ext)
@@ -113,6 +121,12 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
         result = await self._session.execute(select(Extension).where(Extension.name == name))
         ext = result.scalar_one()
         ext.description = description
+        await self._session.commit()
+
+    async def set_schema_version(self, name: str, schema_version: int) -> None:
+        result = await self._session.execute(select(Extension).where(Extension.name == name))
+        ext = result.scalar_one()
+        ext.schema_version = schema_version
         await self._session.commit()
 
     async def set_enabled(self, name: str, enabled: bool) -> None:
@@ -221,6 +235,18 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
             return
         route.validation_mode = validation_mode
         route.body = body
+        await self._session.commit()
+
+    async def record_upstream_health(
+        self, upstream_id: str, status: str, detail: Optional[str], checked_at: datetime
+    ) -> None:
+        result = await self._session.execute(select(ExtensionUpstream).where(ExtensionUpstream.id == upstream_id))
+        upstream = result.scalar_one_or_none()
+        if upstream is None:
+            return
+        upstream.last_status = status
+        upstream.last_detail = detail
+        upstream.last_checked_at = checked_at
         await self._session.commit()
 
     # --- RBAC action provenance -------------------------------------------

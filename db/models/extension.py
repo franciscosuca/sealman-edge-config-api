@@ -18,6 +18,7 @@ class Extension(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(Text, nullable=False, unique=True)
     description = Column(Text, nullable=False, default="")
+    schema_version = Column(Integer, nullable=False, default=1)
     enabled = Column(Boolean, nullable=False, default=False)
     internal_key_hash = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -55,6 +56,9 @@ class ExtensionUpstream(Base):
     health_device_query = Column(Text, nullable=True)
 
     # check-result columns, updated by whatever triggers a check (once implemented)
+    # Persisted rather than ephemeral so independent callers (admin datatable, future
+    # ops dashboard) share one last-known value instead of each caching their own; no
+    # expiry column — staleness is derived from last_checked_at's age by the consumer.
     last_checked_at = Column(TIMESTAMP(timezone=True), nullable=True)
     last_status = Column(Text, nullable=False, default="unknown")  # unknown | healthy | unhealthy
     last_detail = Column(Text, nullable=True)

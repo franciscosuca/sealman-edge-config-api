@@ -32,9 +32,14 @@ from routers.base_api_router import BaseAPIRouter
 from . import registry, runtime
 from .schemas import (
     ExtensionDetail,
+    ExtensionHealthCheckResult,
     ExtensionRegistration,
     InternalKeyRotateResponse,
 )
+
+# Built once at import time — model_json_schema() is a pure function of the model
+# definition, not per-request state.
+_REGISTRATION_SCHEMA = ExtensionRegistration.model_json_schema()
 
 logger = logging.getLogger("EdgeConfigAPI")
 
@@ -81,6 +86,21 @@ def _build_management_router() -> BaseAPIRouter:
         role_repo: RoleRepository = Depends(get_repository(RoleRepository)),
     ) -> ExtensionDetail:
         return await registry.register_extension(extension_repo, role_repo, registration)
+
+    # Registered before "/{name}" — a literal "/schema" path segment must be matched
+    # before the parameterized route would otherwise capture it as `name="schema"`.
+    @router.get(
+        "/schema",
+        summary="Get the extension registration manifest's JSON Schema",
+        description=(
+            "Returns ExtensionRegistration.model_json_schema() verbatim, so extension "
+            "authors/tooling can validate a manifest offline before ever calling "
+            "POST /extensions. Always in sync with the code, unlike a hand-maintained doc."
+        ),
+        dependencies=[read_dep],
+    )
+    async def get_registration_schema() -> dict:
+        return _REGISTRATION_SCHEMA
 
     @router.get(
         "",
@@ -171,6 +191,23 @@ def _build_management_router() -> BaseAPIRouter:
         for app in (_public_app, internal_app):
             runtime.remove_live_routes(app, name)
         return await registry.disable_extension(extension_repo, name)
+
+    @router.post(
+        "/{name}/health-check",
+        summary="Check an extension's upstream health now",
+        description=(
+            "Runs a fresh health check of every one of this extension's upstreams and "
+            "persists the result. A plain GET never triggers a check on its own — it "
+            "only ever returns whatever was last persisted here."
+        ),
+        response_model=ExtensionHealthCheckResult,
+        dependencies=[read_dep],
+    )
+    async def check_extension_health(
+        name: str,
+        extension_repo: ExtensionRepository = Depends(get_repository(ExtensionRepository)),
+    ) -> ExtensionHealthCheckResult:
+        return await registry.check_extension_health(extension_repo, name)
 
     @router.post(
         "/{name}/internal-key/rotate",

@@ -31,6 +31,7 @@ async def _fresh_http_upstream_client() -> AsyncGenerator[None, None]:
 
 def _declared_body_registration(name: str, base_url: str) -> dict:
     return {
+        "schema_version": 1,
         "name": name,
         "description": "declared-body test",
         "upstreams": {"svc": {"type": "http", "base_url": base_url}},
@@ -56,6 +57,7 @@ class TestRouteMetadata:
     async def test_openapi_entry_has_summary_and_extension_tag_with_no_manifest_tags(self, client):
         name = _unique_name("meta_ext")
         registration = {
+            "schema_version": 1,
             "name": name,
             "description": "metadata test",
             "upstreams": {"svc": {"type": "http", "base_url": "http://localhost:9000"}},
@@ -74,6 +76,7 @@ class TestRouteMetadata:
     async def test_two_routes_never_produce_the_same_operation_id(self, client):
         name = _unique_name("opid_ext")
         registration = {
+            "schema_version": 1,
             "name": name,
             "description": "operation_id test",
             "upstreams": {"svc": {"type": "http", "base_url": "http://localhost:9000"}},
@@ -89,6 +92,36 @@ class TestRouteMetadata:
         op_one = openapi["paths"][f"/{name}/one"]["get"]["operationId"]
         op_two = openapi["paths"][f"/{name}/two"]["get"]["operationId"]
         assert op_one != op_two
+
+    async def test_declared_body_route_documents_request_body_schema_and_example(self, client, mock_http_upstream):
+        name = _unique_name("bodydoc_ext")
+        registration = _declared_body_registration(name, mock_http_upstream)
+        assert (await client.post("/extensions", json=registration)).status_code == 201
+        assert (await client.post(f"/extensions/{name}/enable")).status_code == 200
+
+        openapi = (await client.get("/openapi.json")).json()
+        operation = openapi["paths"][f"/{name}/echo"]["post"]
+        request_body_media = operation["requestBody"]["content"]["application/json"]
+        assert request_body_media["schema"] == registration["routes"][0]["body"]
+        assert request_body_media["example"] == registration["routes"][0]["example"]
+
+    async def test_route_with_no_declared_body_has_no_request_body_in_openapi(self, client):
+        name = _unique_name("nobody_ext")
+        registration = {
+            "schema_version": 1,
+            "name": name,
+            "description": "no-body metadata test",
+            "upstreams": {"svc": {"type": "http", "base_url": "http://localhost:9000"}},
+            "routes": [
+                {"upstream": "svc", "path": f"/{name}/ping", "method": "GET", "upstream_path": "/ping"},
+            ],
+        }
+        assert (await client.post("/extensions", json=registration)).status_code == 201
+        assert (await client.post(f"/extensions/{name}/enable")).status_code == 200
+
+        openapi = (await client.get("/openapi.json")).json()
+        operation = openapi["paths"][f"/{name}/ping"]["get"]
+        assert "requestBody" not in operation
 
 
 class TestDeclaredBodyValidation:
@@ -141,6 +174,7 @@ class TestBodyRefRevalidationOnRestart:
     ):
         name = _unique_name("bodyref_ext")
         registration = {
+            "schema_version": 1,
             "name": name,
             "description": "body_ref test",
             "upstreams": {"svc": {"type": "http", "base_url": "http://127.0.0.1:1"}},  # unreachable at registration
