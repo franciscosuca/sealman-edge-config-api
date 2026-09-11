@@ -103,8 +103,13 @@ class RouteSpec(BaseModel):
     validation_mode: Optional[Literal["declared", "upstream_declared", "unreachable_ref", "none"]] = None
     visibility: Literal["public", "internal"] = "public"
     required_action: Optional[str] = None
+    # When true *and* `required_action` is set, public-route ABAC evaluates the
+    # caller's team scopes against the device identified by `scope_param`.
+    # The *value* of that parameter must be `devices.device_id` (the IoT Hub
+    # device id / table PK) — `get_device_meta_raw` looks up by that key.
+    # `scope_param` is only the request-parameter *name* (path or query).
     scoped: bool = False
-    scope_param: str = "device_name"
+    scope_param: str = "device_id"
     scope_in: Literal["path", "query"] = "query"
     upstream_path: Optional[str] = None  # required for `http` upstreams only
     iotedge: Optional[IotEdgeCallSpec] = None  # required for `iotedge` upstreams only

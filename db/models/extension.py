@@ -94,7 +94,7 @@ class ExtensionRoute(Base):
 
     required_action = Column(Text, ForeignKey("actions.name"), nullable=True)
     scoped = Column(Boolean, nullable=False, default=False)
-    scope_param = Column(Text, nullable=False, default="device_name")
+    scope_param = Column(Text, nullable=False, default="device_id")
     scope_in = Column(Text, nullable=False, default="query")
 
     # http transport

@@ -198,7 +198,7 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
                     body_ref=bool(route.get("body_ref")),
                     required_action=route.get("required_action"),
                     scoped=bool(route.get("scoped")),
-                    scope_param=route.get("scope_param") or "device_name",
+                    scope_param=route.get("scope_param") or "device_id",
                     scope_in=route.get("scope_in") or "query",
                     upstream_path=route.get("upstream_path"),
                     iotedge_operation=iotedge.get("operation"),

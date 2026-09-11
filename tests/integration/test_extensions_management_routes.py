@@ -219,6 +219,54 @@ class TestExtensionsManagementRoutesAsAdmin:
         replace_response = await client.put(f"/extensions/{name}", json=replacement)
         assert replace_response.status_code == 200
 
+    async def test_put_of_enabled_extension_remounts_live_routes(self, client):
+        from main import app as public_app
+
+        name = _unique_name("put_remount_ext")
+        await client.post("/extensions", json=_sample_registration(name))
+        await client.post(f"/extensions/{name}/enable")
+        assert len(_live_route_names(public_app, name)) == 1
+
+        replacement = _sample_registration(name)
+        replacement["routes"][0]["path"] = f"/{name}/pong"
+        replacement["routes"][0]["upstream_path"] = "/pong"
+        replace_response = await client.put(f"/extensions/{name}", json=replacement)
+        assert replace_response.status_code == 200
+        assert replace_response.json()["enabled"] is True
+        assert len(_live_route_names(public_app, name)) == 1
+        live_paths = [
+            getattr(r, "path", None)
+            for r in public_app.router.routes
+            if getattr(r, "name", "").startswith(f"extension_route__{name}__")
+        ]
+        assert f"/{name}/pong" in live_paths
+        assert f"/{name}/ping" not in live_paths
+
+        await client.delete(f"/extensions/{name}")
+
+    async def test_register_unknown_grant_to_roles_is_never_persisted(self, client):
+        name = _unique_name("bad_grant_ext")
+        registration = _sample_registration(name)
+        registration["grant_to_roles"] = ["this-role-does-not-exist"]
+
+        response = await client.post("/extensions", json=registration)
+        assert response.status_code == 422
+        assert (await client.get(f"/extensions/{name}")).status_code == 404
+
+    async def test_deregister_strips_actions_from_roles(self, client, db_session):
+        name = _unique_name("strip_ext")
+        action_name = f"{name}.custom_action"
+        registration = _sample_registration(name)
+        registration["actions"] = [{"name": action_name, "description": "custom"}]
+        await client.post("/extensions", json=registration)
+
+        await AbacFixtures(db_session).setup(roles={"holder": [action_name]})
+
+        await client.delete(f"/extensions/{name}")
+
+        result = await db_session.execute(select(Action).where(Action.name == action_name))
+        assert result.scalar_one_or_none() is None
+
 
 class TestExtensionRegistrationSchemaVersion:
     """Phase 6: `schema_version` is required on ExtensionRegistration, and

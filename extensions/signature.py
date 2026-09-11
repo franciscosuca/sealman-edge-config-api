@@ -16,7 +16,7 @@ passes `openapi_extra` to `add_api_route` to document the body's JSON Schema in
 
 import inspect
 import re
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from fastapi import Path, Query, Request
 
@@ -30,11 +30,38 @@ _QUERY_PARAM_TYPES: Dict[str, Type] = {
 }
 
 
+def _implicit_query_params(route: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Query params the runtime needs even if the manifest omitted them.
+
+    * `scoped` + `scope_in=query`: the ABAC/iotedge device identifier.
+    * unscoped `iotedge` routes: `device_id`, which dispatch reads as the IoT Hub target.
+    Path-scoped identifiers are already bound as path params and are not repeated.
+    """
+    extras: List[Dict[str, Any]] = []
+    path_params = set(_PATH_PARAM_RE.findall(route.get("path") or ""))
+    declared = {spec.get("name") for spec in (route.get("query_params") or [])}
+
+    def _ensure(name: str, description: str) -> None:
+        if name in path_params or name in declared or any(e["name"] == name for e in extras):
+            return
+        extras.append({"name": name, "type": "string", "required": True, "description": description})
+
+    if route.get("scoped") and (route.get("scope_in") or "query") == "query":
+        _ensure(
+            route.get("scope_param") or "device_id",
+            "Device identifier (`devices.device_id`) used for ABAC scope and iotedge targeting.",
+        )
+    elif (route.get("iotedge") or route.get("iotedge_operation")) and not route.get("scoped"):
+        _ensure("device_id", "Target IoT Hub device id (`devices.device_id`) the module runs on.")
+    return extras
+
+
 def build_signature(route: Dict[str, Any]) -> inspect.Signature:
     """Returns `request: Request` (the dispatcher only ever reads the raw `Request`
     itself; these bound values exist purely so FastAPI validates/coerces/documents them
     like it would a real route) plus one keyword-only parameter per `{name}` placeholder
-    in `route['path']` and one per `route['query_params']` entry."""
+    in `route['path']` and one per `route['query_params']` entry, plus implicit device-id
+    query params iotedge/ABAC need when they are not already in the path or manifest."""
     parameters = [inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request)]
     used_names = {"request"}
 
@@ -46,7 +73,7 @@ def build_signature(route: Dict[str, Any]) -> inspect.Signature:
             inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, annotation=str, default=Path(...))
         )
 
-    for spec in route.get("query_params") or []:
+    for spec in list(route.get("query_params") or []) + _implicit_query_params(route):
         if spec["name"] in used_names:
             continue
         used_names.add(spec["name"])

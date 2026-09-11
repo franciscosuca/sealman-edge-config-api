@@ -36,7 +36,7 @@ def _resolve_device_id(request: Request, route: Dict[str, Any]) -> str:
     (`scoped`/`scope_param`/`scope_in`) if set, else an explicit `device_id` query param."""
     if route.get("scoped"):
         scope_in = route.get("scope_in") or "query"
-        scope_param = route.get("scope_param") or "device_name"
+        scope_param = route.get("scope_param") or "device_id"
         device_id = (
             request.path_params.get(scope_param)
             if scope_in == "path"

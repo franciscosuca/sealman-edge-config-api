@@ -54,8 +54,21 @@ X-Internal-Key: <key issued at rotation>
   `401` before your upstream is ever called.
 
 Routes registered with `"visibility": "public"` are mounted on the platform's normal
-public app and go through this repo's regular ABAC authorization
-(`required_action`, if you set one on the route) — no `X-Internal-Key` involved.
+public app. Auth is:
+
+- App-wide JWT (every public route).
+- Optional `required_action`: if set, the caller must hold that RBAC action. If
+  omitted, any authenticated user may call the route. That is intentional — some
+  public extension routes are meant to be available to every logged-in user.
+- Optional `scoped: true` (only meaningful together with `required_action`): ABAC
+  then evaluates the caller's team scopes against **one device**. The parameter
+  named by `scope_param` (default `device_id`, in `scope_in` path or query) must
+  carry `devices.device_id` — the IoT Hub device id / `devices` table primary key,
+  **not** a display name. `get_device_meta_raw` looks up by that key. `scope_param`
+  is only the *name* of the request parameter; renaming it to `device_name` does
+  not make the value a friendly name.
+
+Internal routes never use ABAC; they only check `X-Internal-Key`.
 
 ## 3. `http` upstream health contract
 

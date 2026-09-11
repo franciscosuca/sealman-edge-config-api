@@ -107,7 +107,8 @@ class ExtensionRepository(ABC):
 
     @abstractmethod
     async def delete_orphaned_actions(self, action_names: List[str]) -> None:
-        """Best-effort: deletes each of `action_names` that no longer has any
-        `extension_actions` provenance row and isn't granted to any role. Silently
-        skips any action that's still referenced or granted."""
+        """Deletes each of `action_names` that no longer has an `extension_actions`
+        provenance row and isn't granted to any role. Callers that want the action
+        gone must revoke role grants first (PUT refuses; DELETE strips grants then
+        calls this). Silently skips any action that's still referenced or granted."""
         pass

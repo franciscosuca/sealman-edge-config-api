@@ -11,6 +11,7 @@ module-level state — so it can be exercised the same way from the management r
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -27,6 +28,8 @@ from .upstreams import http as http_upstream
 from .upstreams.iotedge import probe_registration_health
 
 logger = logging.getLogger("EdgeConfigAPI")
+
+_PATH_PARAM_RE = re.compile(r"{([^}]+)}")
 
 
 def _validate_manifest_cross_references(registration: ExtensionRegistration) -> None:
@@ -54,6 +57,15 @@ def _validate_manifest_cross_references(registration: ExtensionRegistration) -> 
 
         if route.body is not None and route.body_ref:
             raise APIError(f"Route '{route.path}' cannot set both 'body' (declared schema) and 'body_ref'", 422)
+
+        if route.scoped and route.scope_in == "path":
+            path_params = set(_PATH_PARAM_RE.findall(route.path))
+            if route.scope_param not in path_params:
+                raise APIError(
+                    f"Route '{route.path}' is path-scoped on '{route.scope_param}' "
+                    f"but the path has no '{{{route.scope_param}}}' parameter",
+                    422,
+                )
 
         if route.body is not None:
             try:
@@ -130,10 +142,23 @@ async def _probe_iotedge_upstreams(registration: ExtensionRegistration) -> None:
             logger.warning(f"Extension '{registration.name}' upstream '{key}': {warning}")
 
 
+async def _resolve_grant_roles(role_repo: RoleRepository, registration: ExtensionRegistration) -> List[dict]:
+    """Looks up every `grant_to_roles` name *before* any write. Unknown roles are a
+    422, not a half-created extension."""
+    roles = []
+    for role_name in registration.grant_to_roles:
+        role = await role_repo.get_by_name(role_name)
+        if role is None:
+            raise APIError(f"Role '{role_name}' not found", 422)
+        roles.append(role)
+    return roles
+
+
 async def _enroll_actions(
     extension_repo: ExtensionRepository,
     role_repo: RoleRepository,
     registration: ExtensionRegistration,
+    grant_roles: Optional[List[dict]] = None,
 ) -> None:
     action_names = [action.name for action in registration.actions]
 
@@ -141,12 +166,24 @@ async def _enroll_actions(
         await extension_repo.ensure_action(action.name, action.description, is_global=True)
     await extension_repo.record_extension_actions(registration.name, action_names)
 
-    for role_name in registration.grant_to_roles:
-        role = await role_repo.get_by_name(role_name)
-        if role is None:
-            raise APIError(f"Role '{role_name}' not found", 422)
-        if action_names:
-            await role_repo.add_actions_to_role(role["id"], action_names)
+    if not action_names:
+        return
+    if grant_roles is None:
+        grant_roles = await _resolve_grant_roles(role_repo, registration)
+    for role in grant_roles:
+        await role_repo.add_actions_to_role(role["id"], action_names)
+
+
+async def _strip_actions_from_all_roles(role_repo: RoleRepository, action_names: List[str]) -> None:
+    """Revokes each action from every role that currently holds it. Used by DELETE so
+    the action catalog can actually be cleaned up; PUT still refuses instead."""
+    if not action_names:
+        return
+    for role in await role_repo.list_roles():
+        held = set(role.get("actions") or [])
+        for action_name in action_names:
+            if action_name in held:
+                await role_repo.remove_action_from_role(role["id"], action_name)
 
 
 async def _build_detail(extension_repo: ExtensionRepository, name: str) -> ExtensionDetail:
@@ -191,17 +228,34 @@ async def register_extension(
     registration: ExtensionRegistration,
 ) -> ExtensionDetail:
     """Persists a brand-new extension's manifest with `enabled=false` — a freshly
-    registered extension is inert until explicitly enabled."""
+    registered extension is inert until explicitly enabled.
+
+    Roles in `grant_to_roles` are resolved *before* any write. If a later step
+    fails, the new extension row (and any actions just enrolled for it) is
+    deleted so a 422/5xx never leaves a half-created registration."""
     _validate_manifest_cross_references(registration)
 
     if await extension_repo.extension_exists(registration.name):
         raise APIError(f"Extension '{registration.name}' is already registered", 409)
 
-    await extension_repo.create_extension(registration.name, registration.description, registration.schema_version)
-    await _enroll_actions(extension_repo, role_repo, registration)
-    await _persist_manifest(extension_repo, registration)
-    await _probe_iotedge_upstreams(registration)
+    grant_roles = await _resolve_grant_roles(role_repo, registration)
 
+    await extension_repo.create_extension(registration.name, registration.description, registration.schema_version)
+    try:
+        await _enroll_actions(extension_repo, role_repo, registration, grant_roles)
+        await _persist_manifest(extension_repo, registration)
+    except Exception:
+        action_names = [action.name for action in registration.actions]
+        previously_held = {role["id"]: set(role.get("actions") or []) for role in grant_roles}
+        for role in grant_roles:
+            for action_name in action_names:
+                if action_name not in previously_held[role["id"]]:
+                    await role_repo.remove_action_from_role(role["id"], action_name)
+        await extension_repo.delete_extension(registration.name)
+        await extension_repo.delete_orphaned_actions(action_names)
+        raise
+
+    await _probe_iotedge_upstreams(registration)
     return await _build_detail(extension_repo, registration.name)
 
 
@@ -222,6 +276,7 @@ async def replace_extension(
         raise APIError(f"Extension '{name}' not found", 404)
 
     _validate_manifest_cross_references(registration)
+    grant_roles = await _resolve_grant_roles(role_repo, registration)
 
     old_actions = set(await extension_repo.list_extension_actions(name))
     new_actions = {action.name for action in registration.actions}
@@ -238,7 +293,7 @@ async def replace_extension(
     # A route's required_action FK depends on the action row already existing, so
     # actions must be (re-)enrolled before the new routes referencing them are persisted.
     await extension_repo.clear_extension_actions(name)
-    await _enroll_actions(extension_repo, role_repo, registration)
+    await _enroll_actions(extension_repo, role_repo, registration, grant_roles)
     await _persist_manifest(extension_repo, registration)
     await extension_repo.delete_orphaned_actions(list(old_actions - new_actions))
     await _probe_iotedge_upstreams(registration)
@@ -288,12 +343,21 @@ async def check_extension_health(extension_repo: ExtensionRepository, name: str)
     )
 
 
-async def deregister_extension(extension_repo: ExtensionRepository, name: str) -> None:
+async def deregister_extension(
+    extension_repo: ExtensionRepository,
+    role_repo: RoleRepository,
+    name: str,
+) -> None:
+    """Removes the extension. Unlike PUT, DELETE *does* strip the extension's
+    actions from every role that holds them, then deletes leftover Action rows.
+    PUT is an in-place edit of a still-live catalog entry (don't silently revoke);
+    DELETE is "this extension is gone" (the actions it introduced go with it)."""
     existing = await extension_repo.get_extension_row(name)
     if existing is None:
         raise APIError(f"Extension '{name}' not found", 404)
 
     action_names = await extension_repo.list_extension_actions(name)
+    await _strip_actions_from_all_roles(role_repo, action_names)
     await extension_repo.delete_extension(name)  # cascades upstreams/routes/actions
     await extension_repo.delete_orphaned_actions(action_names)
 

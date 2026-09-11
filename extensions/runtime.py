@@ -129,7 +129,20 @@ def add_routes_from_specs(
         if visibility == "internal":
             dependencies.append(Depends(_internal_key_dependency(extension_name)))
         elif visibility == "public" and route.get("required_action"):
-            dependencies.append(Depends(ABACPermissionCheck(route["required_action"], device_path=None)))
+            # `scoped` drives ABAC device lookup, not just iotedge targeting.
+            # Without it, holding `required_action` is enough for any device.
+            if route.get("scoped"):
+                dependencies.append(
+                    Depends(
+                        ABACPermissionCheck(
+                            route["required_action"],
+                            device_path=route.get("scope_param") or "device_id",
+                            device_in=route.get("scope_in") or "query",
+                        )
+                    )
+                )
+            else:
+                dependencies.append(Depends(ABACPermissionCheck(route["required_action"], device_path=None)))
 
         tags = list(route.get("tags") or []) + [f"Extension: {extension_name}"]
         method = route.get("method") or "GET"

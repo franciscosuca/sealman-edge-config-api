@@ -199,14 +199,14 @@ async def test_probe_registration_health_never_raises_on_exception(monkeypatch):
 
 
 def test_resolve_device_id_scoped_from_path_param():
-    request = _make_request(path_params={"device_name": "dev-42"})
-    route = {"scoped": True, "scope_in": "path", "scope_param": "device_name"}
+    request = _make_request(path_params={"device_id": "dev-42"})
+    route = {"scoped": True, "scope_in": "path", "scope_param": "device_id"}
     assert iotedge._resolve_device_id(request, route) == "dev-42"
 
 
 def test_resolve_device_id_scoped_from_query_param():
-    request = _make_request(query_params=b"device_name=dev-77")
-    route = {"scoped": True, "scope_in": "query", "scope_param": "device_name"}
+    request = _make_request(query_params=b"device_id=dev-77")
+    route = {"scoped": True, "scope_in": "query", "scope_param": "device_id"}
     assert iotedge._resolve_device_id(request, route) == "dev-77"
 
 
@@ -214,7 +214,7 @@ def test_resolve_device_id_missing_raises_400():
     from fastapi import HTTPException
 
     request = _make_request()
-    route = {"scoped": True, "scope_in": "query", "scope_param": "device_name"}
+    route = {"scoped": True, "scope_in": "query", "scope_param": "device_id"}
     with pytest.raises(HTTPException) as exc_info:
         iotedge._resolve_device_id(request, route)
     assert exc_info.value.status_code == 400

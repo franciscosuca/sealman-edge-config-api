@@ -46,3 +46,36 @@ def test_build_signature_skips_query_param_name_colliding_with_path_param():
 def test_build_signature_with_no_path_or_query_params_is_request_only():
     sig = signature.build_signature({"path": "/health", "query_params": []})
     assert list(sig.parameters.keys()) == ["request"]
+
+
+def test_build_signature_adds_implicit_device_id_for_unscoped_iotedge_route():
+    route = {"path": "/mod/restart", "query_params": [], "iotedge_operation": "direct_method"}
+    sig = signature.build_signature(route)
+    assert "device_id" in sig.parameters
+    assert sig.parameters["device_id"].annotation is str
+
+
+def test_build_signature_adds_implicit_scope_param_for_query_scoped_route():
+    route = {
+        "path": "/mod/restart",
+        "query_params": [],
+        "scoped": True,
+        "scope_in": "query",
+        "scope_param": "device_id",
+        "required_action": "mod.restart",
+    }
+    sig = signature.build_signature(route)
+    assert list(sig.parameters.keys()) == ["request", "device_id"]
+
+
+def test_build_signature_does_not_duplicate_path_scoped_device_param():
+    route = {
+        "path": "/devices/{device_id}/restart",
+        "query_params": [],
+        "scoped": True,
+        "scope_in": "path",
+        "scope_param": "device_id",
+        "iotedge_operation": "direct_method",
+    }
+    sig = signature.build_signature(route)
+    assert list(sig.parameters.keys()) == ["request", "device_id"]

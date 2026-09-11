@@ -129,8 +129,10 @@ def _build_management_router() -> BaseAPIRouter:
         "/{name}",
         summary="Replace an extension's manifest",
         description=(
-            "Atomically replaces the entire manifest; never changes `enabled`. Refuses (409) "
-            "to drop an action still granted to a role — clean up role grants first."
+            "Atomically replaces the entire manifest; never changes `enabled`. If the "
+            "extension is currently enabled, live routes are unmounted and re-mounted from "
+            "the new manifest. Refuses (409) to drop an action still granted to a role — "
+            "clean up role grants first (DELETE, by contrast, strips grants)."
         ),
         response_model=ExtensionDetail,
         dependencies=[register_dep],
@@ -141,21 +143,33 @@ def _build_management_router() -> BaseAPIRouter:
         extension_repo: ExtensionRepository = Depends(get_repository(ExtensionRepository)),
         role_repo: RoleRepository = Depends(get_repository(RoleRepository)),
     ) -> ExtensionDetail:
-        return await registry.replace_extension(extension_repo, role_repo, name, registration)
+        detail = await registry.replace_extension(extension_repo, role_repo, name, registration)
+        if detail.enabled:
+            for app in (_public_app, internal_app):
+                runtime.remove_live_routes(app, name)
+            upstreams = await extension_repo.list_upstreams(name)
+            routes = await extension_repo.list_routes(name)
+            runtime.add_routes_from_specs(_public_app, internal_app, name, upstreams, routes)
+        return detail
 
     @router.delete(
         "/{name}",
         summary="Deregister an extension",
+        description=(
+            "Unmounts live routes, strips this extension's actions from every role that "
+            "holds them, then deletes the extension and leftover Action rows."
+        ),
         status_code=204,
         dependencies=[deregister_dep],
     )
     async def delete_extension(
         name: str,
         extension_repo: ExtensionRepository = Depends(get_repository(ExtensionRepository)),
+        role_repo: RoleRepository = Depends(get_repository(RoleRepository)),
     ) -> None:
         for app in (_public_app, internal_app):
             runtime.remove_live_routes(app, name)
-        await registry.deregister_extension(extension_repo, name)
+        await registry.deregister_extension(extension_repo, role_repo, name)
 
     @router.post(
         "/{name}/enable",
