@@ -193,7 +193,7 @@ async def _build_detail(extension_repo: ExtensionRepository, name: str) -> Exten
 
     upstreams_rows = await extension_repo.list_upstreams(name)
     routes_rows = await extension_repo.list_routes(name)
-    actions = await extension_repo.list_extension_actions(name)
+    actions = await extension_repo.list_extension_action_specs(name)
 
     upstreams = {row["key"]: {k: v for k, v in row.items() if k not in ("id", "key")} for row in upstreams_rows}
     routes = []
@@ -215,7 +215,7 @@ async def _build_detail(extension_repo: ExtensionRepository, name: str) -> Exten
         description=ext["description"],
         schema_version=ext["schema_version"],
         upstreams=upstreams,
-        actions=[{"name": a} for a in actions],
+        actions=actions,
         grant_to_roles=[],
         routes=routes,
         enabled=ext["enabled"],

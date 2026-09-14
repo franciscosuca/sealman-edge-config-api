@@ -102,6 +102,15 @@ class ExtensionRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_extension_action_specs(self, extension_name: str) -> List[Dict[str, str]]:
+        """Enrolled actions with descriptions from the RBAC `actions` table.
+
+        Used by GET reconstruction. `list_extension_actions` stays name-only for
+        RBAC enroll/revoke comparisons.
+        """
+        pass
+
+    @abstractmethod
     async def is_action_granted_to_any_role(self, action_name: str) -> bool:
         pass
 

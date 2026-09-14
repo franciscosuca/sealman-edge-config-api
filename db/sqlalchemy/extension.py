@@ -283,6 +283,17 @@ class SqlAlchemyExtensionRepository(ExtensionRepository):
         )
         return [row[0] for row in result.all()]
 
+    async def list_extension_action_specs(self, extension_name: str) -> List[Dict[str, str]]:
+        extension_id = await self._get_extension_id(extension_name)
+        if extension_id is None:
+            return []
+        result = await self._session.execute(
+            select(Action.name, Action.description)
+            .join(ExtensionAction, ExtensionAction.action_name == Action.name)
+            .where(ExtensionAction.extension_id == extension_id)
+        )
+        return [{"name": row[0], "description": row[1] or ""} for row in result.all()]
+
     async def is_action_granted_to_any_role(self, action_name: str) -> bool:
         result = await self._session.execute(
             select(exists().where(role_actions.c.action_name == action_name))

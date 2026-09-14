@@ -70,6 +70,24 @@ class TestExtensionsManagementRoutesAsAdmin:
         assert get_response.status_code == 200
         assert get_response.json()["name"] == name
 
+    async def test_get_returns_enrolled_action_descriptions(self, client):
+        name = _unique_name("action_desc_ext")
+        action_name = f"{name}.read"
+        registration = _sample_registration(name)
+        registration["actions"] = [{"name": action_name, "description": "Read widgets"}]
+
+        register_response = await client.post("/extensions", json=registration)
+        assert register_response.status_code == 201
+        assert register_response.json()["actions"] == [
+            {"name": action_name, "description": "Read widgets"}
+        ]
+
+        get_response = await client.get(f"/extensions/{name}")
+        assert get_response.status_code == 200
+        assert get_response.json()["actions"] == [
+            {"name": action_name, "description": "Read widgets"}
+        ]
+
         replacement = _sample_registration(name)
         replacement["description"] = "Updated description"
         replace_response = await client.put(f"/extensions/{name}", json=replacement)
